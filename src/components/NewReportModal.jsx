@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase, REPORT_CATEGORIES, ZONES, VOLUME_LEVELS, SEVERITY_BY_VOLUME, PRIORITY_BY_SEVERITY, generateReferenceCode } from '../lib/supabaseClient'
+import { api, REPORT_CATEGORIES, ZONES, VOLUME_LEVELS, SEVERITY_BY_VOLUME, PRIORITY_BY_SEVERITY, generateReferenceCode } from '../lib/api/index.js'
 import { analyzeReport } from '../lib/ai'
 import { uploadEvidence } from '../lib/storage'
 import { Icon } from './ui'
@@ -95,7 +95,7 @@ export default function NewReportModal({ open, onClose, onCreated }) {
       approval_status: 'Approved',
       citizen_update: 'Report logged by operator and queued for assignment.',
     }
-    const { data, error: dbError } = await supabase.from('swachhlens_reports').insert(row).select().single()
+    const { data, error: dbError } = await api.from('swachhlens_reports').insert(row).select().single()
     setSaving(false)
     if (dbError) { setError('Could not save the report.'); return }
     onCreated(data)

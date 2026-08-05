@@ -1,4 +1,4 @@
-import { supabase, generateReferenceCode, generateTaskCode } from './supabaseClient'
+import { api, generateReferenceCode, generateTaskCode } from './api/index.js'
 import { analyzeReport } from './ai'
 
 const seedReports = [
@@ -81,9 +81,71 @@ const sampleTasks = [
   { crew_name: 'River Crew B', vehicle: 'Sweeper S-07', eta: '40 min' },
 ]
 
+const demoAccounts = [
+  {
+    email: 'operator@swachhlens.local',
+    password: 'Swachh123!',
+    role: 'operator',
+    full_name: 'Demo Operator',
+    phone: '',
+    zone: 'Central',
+  },
+  {
+    email: 'green@squad.local',
+    password: 'Swachh123!',
+    role: 'worker',
+    full_name: 'Green Squad A',
+    phone: '+91 90000 10001',
+    zone: 'Central',
+    latitude: 12.9783,
+    longitude: 77.5921,
+  },
+  {
+    email: 'river@crew.local',
+    password: 'Swachh123!',
+    role: 'worker',
+    full_name: 'River Crew B',
+    phone: '+91 90000 10002',
+    zone: 'Riverside',
+    latitude: 12.9442,
+    longitude: 77.5808,
+  },
+]
+
 export async function seedDemoData() {
-  const { count } = await supabase.from('swachhlens_reports').select('*', { count: 'exact', head: true })
+  const { count } = await api.from('swachhlens_reports').select('*', { count: 'exact', head: true })
   if (count && count > 0) return false
+
+  const seededProfiles = {}
+  for (const account of demoAccounts) {
+    const { data: authData } = await api.auth.ensureUser({
+      email: account.email,
+      password: account.password,
+      role: account.role,
+      full_name: account.full_name,
+      phone: account.phone,
+      zone: account.zone,
+      latitude: account.latitude,
+      longitude: account.longitude,
+      is_available: true,
+    })
+    const profileCheck = await api.from('profiles').select('id').eq('id', authData.user.id).maybeSingle()
+    if (!profileCheck.data) {
+      const { data: profile } = await api.from('profiles').insert({
+        id: authData.user.id,
+        role: account.role,
+        full_name: account.full_name,
+        phone: account.phone || '',
+        zone: account.zone || 'Central',
+        latitude: account.latitude,
+        longitude: account.longitude,
+        is_available: true,
+      }).select().single()
+      if (profile?.id) seededProfiles[account.full_name] = profile
+    } else {
+      seededProfiles[account.full_name] = { id: authData.user.id }
+    }
+  }
 
   for (let i = 0; i < seedReports.length; i++) {
     const s = seedReports[i]
@@ -111,14 +173,15 @@ export async function seedDemoData() {
       ai_analysis: ai,
       status,
       approval_status: approval,
+      assigned_worker_id: i < 2 ? (i === 0 ? seededProfiles['Green Squad A']?.id : seededProfiles['River Crew B']?.id) : null,
       citizen_update: status === 'Assigned' ? 'Crew dispatched and on the way.' : approval === 'Auto-approved' ? 'Report auto-approved and queued for worker assignment.' : 'Report received and awaiting operator review.',
     }
-    const { data } = await supabase.from('swachhlens_reports').insert(reportRow).select().single()
+    const { data } = await api.from('swachhlens_reports').insert(reportRow).select().single()
 
     if (i < 2 && data) {
       const task = sampleTasks[i]
       const scheduled = new Date(Date.now() + (i === 0 ? 15 : 45) * 60000).toISOString()
-      await supabase.from('swachhlens_tasks').insert({
+      await api.from('swachhlens_tasks').insert({
         report_id: data.id,
         task_code: generateTaskCode(),
         crew_name: task.crew_name,
@@ -128,6 +191,7 @@ export async function seedDemoData() {
         scheduled_for: scheduled,
         latitude: data.latitude,
         longitude: data.longitude,
+        worker_id: i === 0 ? seededProfiles['Green Squad A']?.id : seededProfiles['River Crew B']?.id,
       })
     }
   }

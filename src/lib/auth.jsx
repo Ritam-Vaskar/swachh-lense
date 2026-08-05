@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import { supabase } from './supabaseClient'
+import { api } from './api/index.js'
 
 const AuthContext = createContext(null)
 
@@ -9,13 +9,13 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    api.auth.getSession().then(({ data }) => {
       setSession(data.session)
       if (data.session) loadProfile(data.session.user.id)
       else setLoading(false)
     })
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: sub } = api.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession)
       if (newSession) {
         ;(async () => loadProfile(newSession.user.id))()
@@ -28,13 +28,13 @@ export function AuthProvider({ children }) {
   }, [])
 
   async function loadProfile(userId) {
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
+    const { data } = await api.from('profiles').select('*').eq('id', userId).maybeSingle()
     setProfile(data)
     setLoading(false)
   }
 
   async function ensureProfile(user, role, extra = {}) {
-    const { data: existing } = await supabase.from('profiles').select('id').eq('id', user.id).maybeSingle()
+    const { data: existing } = await api.from('profiles').select('id').eq('id', user.id).maybeSingle()
     if (existing) {
       await loadProfile(user.id)
       return
@@ -46,26 +46,26 @@ export function AuthProvider({ children }) {
       phone: extra.phone || '',
       zone: extra.zone || 'Central',
     }
-    const { data } = await supabase.from('profiles').insert(row).select().single()
+    const { data } = await api.from('profiles').insert(row).select().single()
     setProfile(data)
   }
 
   async function signUp({ email, password, role, full_name, phone, zone }) {
-    const { data, error } = await supabase.auth.signUp({ email, password })
+    const { data, error } = await api.auth.signUp({ email, password })
     if (error) return { error }
     if (data.user) await ensureProfile(data.user, role, { full_name, phone, zone })
     return { error: null }
   }
 
   async function signIn({ email, password }) {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error } = await api.auth.signInWithPassword({ email, password })
     if (error) return { error }
     if (data.user) await loadProfile(data.user.id)
     return { error: null }
   }
 
   async function signOut() {
-    await supabase.auth.signOut()
+    await api.auth.signOut()
     setSession(null)
     setProfile(null)
   }

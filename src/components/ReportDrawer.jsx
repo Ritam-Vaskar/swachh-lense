@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase, STATUS_FLOW, generateTaskCode } from '../lib/supabaseClient'
+import { api, STATUS_FLOW, generateTaskCode } from '../lib/api/index.js'
 import { useAuth } from '../lib/auth'
 import { findNearestWorker, haversineKm } from '../lib/ai'
 import { Badge, Icon } from './ui'
@@ -16,7 +16,7 @@ export default function ReportDrawer({ report, onClose, onChanged, toast }) {
   useEffect(() => {
     if (!report) return
     setLoadingTasks(true)
-    supabase
+    api
       .from('swachhlens_tasks')
       .select('*, worker:profiles(*)')
       .eq('report_id', report.id)
@@ -25,7 +25,7 @@ export default function ReportDrawer({ report, onClose, onChanged, toast }) {
         setTasks(data || [])
         setLoadingTasks(false)
       })
-    supabase
+    api
       .from('profiles')
       .select('*')
       .eq('role', 'worker')
@@ -38,7 +38,7 @@ export default function ReportDrawer({ report, onClose, onChanged, toast }) {
   const ai = report.ai_analysis
 
   async function updateReport(patch, message) {
-    const { data, error } = await supabase
+    const { data, error } = await api
       .from('swachhlens_reports')
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq('id', report.id)
@@ -76,7 +76,7 @@ export default function ReportDrawer({ report, onClose, onChanged, toast }) {
     setAssigning(true)
     const distKm = haversineKm(report.latitude, report.longitude, worker.latitude, worker.longitude)
     const eta = `${Math.max(10, Math.round(distKm * 4))} min`
-    const { data: task, error } = await supabase
+    const { data: task, error } = await api
       .from('swachhlens_tasks')
       .insert({
         report_id: report.id,
@@ -124,14 +124,14 @@ export default function ReportDrawer({ report, onClose, onChanged, toast }) {
       'Report verified and closed.',
     )
     if (tasks[0]) {
-      await supabase.from('swachhlens_tasks').update({ status: 'Verified', updated_at: new Date().toISOString() }).eq('id', tasks[0].id)
+      await api.from('swachhlens_tasks').update({ status: 'Verified', updated_at: new Date().toISOString() }).eq('id', tasks[0].id)
       setTasks((t) => t.map((x) => (x.id === tasks[0].id ? { ...x, status: 'Verified' } : x)))
     }
   }
 
   async function escalate() {
     if (!tasks[0]) return
-    await supabase.from('swachhlens_tasks').update({ escalated: true, updated_at: new Date().toISOString() }).eq('id', tasks[0].id)
+    await api.from('swachhlens_tasks').update({ escalated: true, updated_at: new Date().toISOString() }).eq('id', tasks[0].id)
     setTasks((t) => t.map((x) => (x.id === tasks[0].id ? { ...x, escalated: true } : x)))
     toast('Task escalated to zone supervisor.', 'success')
   }

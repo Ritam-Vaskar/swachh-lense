@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase, REPORT_CATEGORIES, generateReferenceCode } from '../lib/supabaseClient'
+import { api, REPORT_CATEGORIES, generateReferenceCode } from '../lib/api/index.js'
 import { analyzeReport } from '../lib/ai'
 import { uploadEvidence } from '../lib/storage'
 import { Icon, Toast } from './ui'
@@ -45,7 +45,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
     const key = 'swachhlens_citizen_refs'
     const refs = JSON.parse(localStorage.getItem(key) || '[]')
     if (refs.length === 0) return
-    supabase
+    api
       .from('swachhlens_reports')
       .select('*')
       .in('reference_code', refs)
@@ -98,7 +98,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
         ? 'Report auto-approved and queued for worker assignment.'
         : 'Report received and awaiting operator review.',
     }
-    const { data, error } = await supabase.from('swachhlens_reports').insert(row).select().single()
+    const { data, error } = await api.from('swachhlens_reports').insert(row).select().single()
     if (error) {
       showToast('Could not submit report. Please try again.', 'error')
       setStep('review')

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { api } from '../lib/api/index.js'
 import { useAuth } from '../lib/auth'
 import { rateCompletion } from '../lib/ai'
 import { uploadEvidence } from '../lib/storage'
@@ -23,7 +23,7 @@ export default function WorkerDashboard({ onSignOut }) {
   const loadTasks = useCallback(async () => {
     if (!profile) return
     setLoading(true)
-    const { data } = await supabase
+    const { data } = await api
       .from('swachhlens_tasks')
       .select('*, report:swachhlens_reports(*)')
       .eq('worker_id', profile.id)
@@ -35,11 +35,11 @@ export default function WorkerDashboard({ onSignOut }) {
   useEffect(() => {
     loadTasks()
     // Realtime subscription for new task assignments
-    const sub = supabase
+    const sub = api
       .channel('worker-tasks')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'swachhlens_tasks', filter: `worker_id=eq.${profile?.id}` }, () => loadTasks())
       .subscribe()
-    return () => supabase.removeChannel(sub)
+    return () => api.removeChannel(sub)
   }, [loadTasks, profile])
 
   // Update worker's live GPS
@@ -48,7 +48,7 @@ export default function WorkerDashboard({ onSignOut }) {
     if (navigator.geolocation) {
       const watcher = navigator.geolocation.watchPosition(
         (pos) => {
-          supabase
+          api
             .from('profiles')
             .update({ latitude: pos.coords.latitude, longitude: pos.coords.longitude })
             .eq('id', profile.id)
@@ -62,7 +62,7 @@ export default function WorkerDashboard({ onSignOut }) {
   }, [profile])
 
   async function updateTaskStatus(task, status) {
-    const { error } = await supabase
+    const { error } = await api
       .from('swachhlens_tasks')
       .update({ status, updated_at: new Date().toISOString() })
       .eq('id', task.id)
@@ -84,7 +84,7 @@ export default function WorkerDashboard({ onSignOut }) {
       beforeUrl: task.report?.image_url,
       afterUrl,
     })
-    const { error } = await supabase
+    const { error } = await api
       .from('swachhlens_tasks')
       .update({
         status: 'Completed',
@@ -98,7 +98,7 @@ export default function WorkerDashboard({ onSignOut }) {
     if (error) { showToast('Could not submit completion.', 'error'); return }
 
     // Update the linked report to Resolved
-    await supabase
+    await api
       .from('swachhlens_reports')
       .update({ status: 'Resolved', citizen_update: 'Site cleaned. Awaiting verification.', updated_at: new Date().toISOString() })
       .eq('id', task.report_id)

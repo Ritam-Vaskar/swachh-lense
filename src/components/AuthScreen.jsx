@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../lib/auth'
 import { Icon } from './ui'
-import { ZONES } from '../lib/supabaseClient'
+import { ZONES } from '../lib/api/index.js'
 
 export default function AuthScreen({ onCitizen }) {
   const { signIn, signUp } = useAuth()

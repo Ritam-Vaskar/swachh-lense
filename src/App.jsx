@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AuthProvider, useAuth } from './lib/auth'
-import { supabase } from './lib/supabaseClient'
+import { api } from './lib/api/index.js'
 import { seedDemoData } from './lib/seed'
 import { Badge, Icon, Tag, Toast } from './components/ui'
 import NewReportModal from './components/NewReportModal'
@@ -84,14 +84,14 @@ function OperatorDashboard() {
 
   const loadReports = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await supabase.from('swachhlens_reports').select('*').order('reported_at', { ascending: false })
+    const { data, error } = await api.from('swachhlens_reports').select('*').order('reported_at', { ascending: false })
     if (error) toast('Could not load reports.', 'error')
     else setReports(data || [])
     setLoading(false)
   }, [toast])
 
   const loadWorkers = useCallback(async () => {
-    const { data } = await supabase.from('profiles').select('*').eq('role', 'worker')
+    const { data } = await api.from('profiles').select('*').eq('role', 'worker')
     setWorkers(data || [])
   }, [])
 
@@ -108,7 +108,7 @@ function OperatorDashboard() {
     })()
 
     // Realtime subscriptions
-    const reportSub = supabase
+    const reportSub = api
       .channel('reports-rt')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'swachhlens_reports' }, (payload) => {
         if (payload.eventType === 'INSERT') {
@@ -122,7 +122,7 @@ function OperatorDashboard() {
       })
       .subscribe()
 
-    return () => supabase.removeChannel(reportSub)
+    return () => api.removeChannel(reportSub)
   }, [loadReports, loadWorkers, toast])
 
   function handleChanged(updated) {

@@ -313,19 +313,13 @@ export async function runVisionAgent(reportId) {
 
   console.log(`[VisionAgent] Report ${reportId} analyzed: ${analysis.category}, severity ${analysis.severity_score}, ${approvalStatus}`)
 
-  // 6. Chain to Correlation Agent + Priority Agent (Phase 3/4 will implement these)
+  // 6. Chain to Correlation Agent (Phase 3)
   setImmediate(async () => {
     try {
       const { runCorrelationAgent } = await import('./correlationAgent.js')
       await runCorrelationAgent(reportId)
-    } catch {
-      // correlationAgent not yet implemented — safe to ignore
-    }
-    try {
-      const { runApprovalAgent } = await import('./approvalAgent.js')
-      if (analysis.autoApproved) await runApprovalAgent(reportId, 'auto')
-    } catch {
-      // approvalAgent not yet implemented — safe to ignore
+    } catch (err) {
+      console.error('[VisionAgent] Failed to chain to Correlation Agent:', err)
     }
   })
 

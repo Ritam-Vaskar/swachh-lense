@@ -88,16 +88,17 @@ function heuristicAnalysis({ description = '', category = '', hazard_flag = fals
 // ---------------------------------------------------------------------------
 
 async function analyzeWithGemini(imageDataUrl, description = '', category = '') {
-  const prompt = `You are a waste management AI analyst. Analyze this image of a waste problem and return a JSON object with EXACTLY these fields:
+  const prompt = `You are a waste management AI analyst. Analyze this image and return a JSON object with EXACTLY these fields:
 {
-  "category": one of ["Overflowing bin","Illegal dumpsite","Blocked drain","Street litter","Medical waste","Construction debris","Dead animal","Public toilet issue"],
+  "is_waste": boolean (true if the image actually depicts waste/garbage/overflow, false if it's unrelated like a selfie, pet, landscape, etc.),
+  "category": one of ["Overflowing bin","Illegal dumpsite","Blocked drain","Street litter","Medical waste","Construction debris","Dead animal","Public toilet issue", "Not Waste"],
   "volume": one of ["Small","Medium","Large","Overflowing"],
   "hazard_flag": boolean (true if visible health/safety risk),
   "severity_score": integer 1-100,
   "team_size": integer 1-5 (workers needed),
   "confidence": integer 50-99 (your confidence in this analysis),
-  "reasoning": "brief 1-2 sentence explanation of what you see",
-  "summary": "actionable summary for the operations team"
+  "reasoning": "brief 1-2 sentence explanation of what you see and why you flagged it",
+  "summary": "actionable summary for the operations team (or explanation of why it is rejected)"
 }
 Context from reporter: "${description || 'No description provided'}". ${category ? `Suggested category: ${category}.` : ''}
 Return ONLY the JSON object. No markdown, no code fences.`
@@ -156,8 +157,26 @@ Return ONLY the JSON object. No markdown, no code fences.`
 }
 
 // ---------------------------------------------------------------------------
-// Main Vision Agent entry point
+// Main Vision Agent entry points
 // ---------------------------------------------------------------------------
+
+export async function analyzeImageData(imageDataUrl, description, category) {
+  let analysis
+  if (GEMINI_API_KEY && imageDataUrl && imageDataUrl.startsWith('data:')) {
+    try {
+      console.log('[VisionAgent] Running Gemini Vision analysis...')
+      analysis = await analyzeWithGemini(imageDataUrl, description, category)
+    } catch (err) {
+      console.error('[VisionAgent] Gemini call failed, falling back to heuristic:', err.message)
+      analysis = heuristicAnalysis({ description, category })
+      analysis.is_waste = true // fallback assumes it is waste if Gemini fails
+    }
+  } else {
+    analysis = heuristicAnalysis({ description, category })
+    analysis.is_waste = true
+  }
+  return analysis
+}
 
 export async function runVisionAgent(reportId) {
   const pool = getPool()
@@ -173,10 +192,9 @@ export async function runVisionAgent(reportId) {
     return
   }
 
-  // 2. Get the image data (stored in media_uploads or directly as image_url)
+  // 2. Get the image data
   let imageDataUrl = null
   if (report.image_url) {
-    // Try to retrieve from media_uploads table first
     const { rows: mediaRows } = await pool.query(
       'SELECT data_url FROM media_uploads WHERE path = $1 LIMIT 1',
       [report.image_url],
@@ -185,23 +203,7 @@ export async function runVisionAgent(reportId) {
   }
 
   // 3. Run analysis
-  let analysis
-  if (GEMINI_API_KEY && imageDataUrl && imageDataUrl.startsWith('data:')) {
-    try {
-      console.log('[VisionAgent] Running Gemini Vision analysis for report', reportId)
-      analysis = await analyzeWithGemini(imageDataUrl, report.description, report.category)
-    } catch (err) {
-      console.error('[VisionAgent] Gemini call failed, falling back to heuristic:', err.message)
-      analysis = heuristicAnalysis({ description: report.description, category: report.category, hazard_flag: report.hazard_flag })
-    }
-  } else {
-    if (GEMINI_API_KEY && !imageDataUrl) {
-      console.log('[VisionAgent] No image found for report', reportId, '— using text heuristic')
-    } else if (!GEMINI_API_KEY) {
-      console.log('[VisionAgent] No GEMINI_API_KEY set — using heuristic for report', reportId)
-    }
-    analysis = heuristicAnalysis({ description: report.description, category: report.category, hazard_flag: report.hazard_flag })
-  }
+  const analysis = await analyzeImageData(imageDataUrl, report.description, report.category)
 
   // 4. Determine approval status from analysis
   const approvalStatus = analysis.autoApproved ? 'Auto-approved' : 'Pending'

@@ -42,16 +42,27 @@ router.post('/intake', async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // POST /api/agents/vision/analyze
-// Manually (re-)trigger vision analysis for an existing report.
-// Body: { reportId }
+// Synchronously analyze a photo to detect spam or extract waste info before submission.
+// Body: { imageUrl, description, category }
 // ---------------------------------------------------------------------------
 router.post('/vision/analyze', async (req, res) => {
-  const { reportId } = req.body || {}
-  if (!reportId) {
-    return res.status(400).json({ error: 'reportId is required.' })
-  }
+  const { imageUrl, description, category } = req.body || {}
   try {
-    const analysis = await runVisionAgent(reportId)
+    const { getPool } = await import('../models/database.js')
+    const pool = getPool()
+    let imageDataUrl = imageUrl
+    
+    // If it's a media path, look up the data_url
+    if (imageUrl && !imageUrl.startsWith('data:')) {
+      const { rows } = await pool.query(
+        'SELECT data_url FROM media_uploads WHERE path = $1 LIMIT 1',
+        [imageUrl]
+      )
+      if (rows[0]) imageDataUrl = rows[0].data_url
+    }
+
+    const { analyzeImageData } = await import('../agents/visionAgent.js')
+    const analysis = await analyzeImageData(imageDataUrl, description, category)
     res.json({ success: true, analysis })
   } catch (err) {
     console.error('[Route /agents/vision/analyze]', err)

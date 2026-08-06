@@ -76,7 +76,7 @@ async function createReportRecord(data) {
 
   const citizenUpdate = 'Report received and queued for AI analysis.'
 
-  const { rows } = await pool.query(
+    const { rows } = await pool.query(
     `INSERT INTO swachhlens_reports (
        id, reference_code, category, location, zone,
        latitude, longitude, volume, hazard_flag, description,
@@ -86,15 +86,17 @@ async function createReportRecord(data) {
      ) VALUES (
        $1,$2,$3,$4,$5,
        $6,$7,$8,$9,$10,
-       $11,$12,$13,'New','Pending',
-       $14,'Medium',50,0,1,
-       1,NULL,now(),now()
+       $11,$12,$13,'New',$14,
+       $15,$16,$17,$18,$19,
+       1,$20,now(),now()
      ) RETURNING *`,
     [
       id, referenceCode, category, (location || `GPS ${latitude?.toFixed(4)}, ${longitude?.toFixed(4)}`).trim(), zone,
       latitude, longitude, volume, hazard_flag, description,
       resident_name || 'Citizen', citizen_phone || '', image_url || null,
-      citizenUpdate,
+      data.ai_analysis?.autoApproved ? 'Auto-approved' : 'Pending',
+      citizenUpdate, data.ai_analysis?.priority || 'Medium', data.ai_analysis?.severity_score || 50, 
+      data.ai_analysis?.confidence || 0, data.ai_analysis?.team_size || 1, data.ai_analysis ? JSON.stringify(data.ai_analysis) : null
     ],
   )
 
@@ -121,20 +123,21 @@ export async function runIntakeAgent(body) {
     return { success: false, error: 'Could not save report. Please try again.' }
   }
 
-  // Step 3: Trigger Vision Agent asynchronously — does not block the citizen's response
-  // Import lazily to avoid circular deps. Vision agent will update the record itself.
+  // Step 3: Chain to Correlation Agent + Priority Agent (Phase 3/4)
   setImmediate(async () => {
     try {
-      const { runVisionAgent } = await import('./visionAgent.js')
-      await runVisionAgent(report.id)
-    } catch (err) {
-      console.error('[IntakeAgent] Vision agent trigger failed for report', report.id, err.message)
-    }
+      const { runCorrelationAgent } = await import('./correlationAgent.js')
+      await runCorrelationAgent(report.id)
+    } catch { }
+    try {
+      const { runApprovalAgent } = await import('./approvalAgent.js')
+      if (body.ai_analysis?.autoApproved) await runApprovalAgent(report.id, 'auto')
+    } catch { }
   })
 
   return {
     success: true,
     report,
-    message: 'Report received. AI analysis is running — the record will update shortly.',
+    message: 'Report received and verified.',
   }
 }

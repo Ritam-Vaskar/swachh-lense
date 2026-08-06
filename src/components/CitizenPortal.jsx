@@ -30,6 +30,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
   const [category, setCategory] = useState('')
   const [phone, setPhone] = useState('')
   const [analysis, setAnalysis] = useState(null)
+  const [uploadedImageUrl, setUploadedImageUrl] = useState(null)
   const [submittedRef, setSubmittedRef] = useState(null)
   const [myReports, setMyReports] = useState([])
   const [toast, setToast] = useState(null)
@@ -68,21 +69,50 @@ export default function CitizenPortal({ onBackToSignIn }) {
   function handlePhoto(file) {
     setPhoto(file)
     setPhotoUrl(URL.createObjectURL(file))
-    // Move directly to review — real AI analysis runs server-side after submission
-    setStep('review')
+    setUploadedImageUrl(null)
+  }
+
+  async function analyzePhoto() {
+    if (!photo) return
+    setStep('analyzing')
+
+    let urlToUse = uploadedImageUrl
+    if (!urlToUse) {
+      const { url, error } = await uploadEvidence(photo, 'citizen')
+      if (error || !url) {
+        showToast('Failed to upload photo.', 'error')
+        setStep('capture')
+        return
+      }
+      urlToUse = url
+      setUploadedImageUrl(url)
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/agents/vision/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: urlToUse, description, category }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to analyze')
+
+      setAnalysis(data.analysis)
+      if (data.analysis.is_waste === false) {
+        setStep('rejected')
+      } else {
+        if (data.analysis.category) setCategory(data.analysis.category)
+        setStep('review')
+      }
+    } catch (err) {
+      showToast('AI analysis failed. You can still submit manually.', 'error')
+      setStep('review')
+    }
   }
 
   async function submitReport() {
     setStep('submitting')
 
-    // Step 1: Upload photo
-    let imageUrl = null
-    if (photo) {
-      const { url, error: upErr } = await uploadEvidence(photo, 'citizen')
-      if (!upErr && url) imageUrl = url
-    }
-
-    // Step 2: Call Intake Agent — backend handles validation, DB insert, and Gemini Vision
     try {
       const result = await callIntakeAgent({
         category: category || '',
@@ -92,11 +122,10 @@ export default function CitizenPortal({ onBackToSignIn }) {
         description: description || '',
         resident_name: 'Citizen',
         citizen_phone: phone,
-        image_url: imageUrl,
+        image_url: uploadedImageUrl,
         source: 'citizen',
         zone: 'Central',
-        volume: 'Medium', // Vision agent will override with real value
-        hazard_flag: false, // Vision agent will detect
+        ai_analysis: analysis
       })
 
       // Store reference in localStorage for tracking
@@ -129,6 +158,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
     setCategory('')
     setAnalysis(null)
     setSubmittedRef(null)
+    setUploadedImageUrl(null)
   }
 
   return (
@@ -162,6 +192,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
                 category={category}
                 setCategory={setCategory}
                 onPhoto={handlePhoto}
+                onNext={analyzePhoto}
               />
             )}
 
@@ -185,8 +216,26 @@ export default function CitizenPortal({ onBackToSignIn }) {
                 setPhone={setPhone}
                 gps={gps}
                 onSubmit={submitReport}
-                onBack={reset}
+                onBack={() => setStep('capture')}
               />
+            )}
+
+            {step === 'rejected' && (
+              <div className="analyzing-card" style={{ padding: '40px 20px', textAlign: 'center' }}>
+                <Icon name="XCircle" size={48} color="#ef4444" />
+                <h3 style={{ marginTop: 16 }}>Image Rejected</h3>
+                <p className="muted" style={{ maxWidth: 400, margin: '10px auto' }}>
+                  Our AI determined this image does not depict waste or is unrelated to city cleanliness.
+                </p>
+                {analysis?.reasoning && (
+                  <div style={{ background: 'var(--surface-muted)', padding: 12, borderRadius: 8, marginTop: 16, textAlign: 'left', fontSize: 14 }}>
+                    <strong>AI Reasoning:</strong> {analysis.reasoning}
+                  </div>
+                )}
+                <button className="btn btn-primary" style={{ marginTop: 24 }} onClick={() => { setStep('capture'); setPhoto(null); setPhotoUrl(null) }}>
+                  <Icon name="Camera" size={16} /> Retake Photo
+                </button>
+              </div>
             )}
 
             {step === 'submitting' && (
@@ -209,7 +258,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
   )
 }
 
-function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, category, setCategory, onPhoto }) {
+function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, category, setCategory, onPhoto, onNext }) {
   return (
     <div className="capture-grid">
       <div className="capture-left">
@@ -281,6 +330,12 @@ function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, cat
                 <div><Icon name="MapPinOff" size={28} /><div style={{ fontSize: 13, marginTop: 6 }}>Waiting for GPS…</div></div>
               </div>
             )}
+            
+            {photoUrl && (
+              <button className="btn btn-primary" style={{ width: '100%', marginTop: 20, padding: 14, fontSize: 16 }} onClick={onNext}>
+                Analyze &amp; Continue <Icon name="ArrowRight" size={16} />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -304,14 +359,15 @@ function ReviewStep({ photoUrl, analysis, category, setCategory, description, se
                 <div className="ai-row"><span className="muted">Priority</span><span className="badge" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>{analysis.priority}</span></div>
                 {analysis.team_size && <div className="ai-row"><span className="muted">Recommended team</span><strong>{analysis.team_size} worker{analysis.team_size > 1 ? 's' : ''}</strong></div>}
                 <div className="ai-row"><span className="muted">Hazard flagged</span><strong>{analysis.hazard_flag ? 'Yes' : 'No'}</strong></div>
-                {analysis.summary && <p className="ai-summary">{analysis.summary}</p>}
+                {analysis.reasoning && (
+                  <div className="ai-row" style={{ flexDirection: 'column', alignItems: 'flex-start', borderBottom: 'none', paddingBottom: 0 }}>
+                    <span className="muted" style={{ marginBottom: 4 }}>AI Reasoning</span>
+                    <strong style={{ fontSize: 13, lineHeight: 1.4 }}>{analysis.reasoning}</strong>
+                  </div>
+                )}
+                {analysis.summary && <p className="ai-summary" style={{ marginTop: 12 }}>{analysis.summary}</p>}
               </>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0', color: 'var(--text-muted)', fontSize: 13 }}>
-                <Icon name="Sparkles" size={16} />
-                <span>AI analysis will run automatically after you submit. Results appear in the operations dashboard within seconds.</span>
-              </div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>

@@ -130,16 +130,34 @@ async function insertRows({ table, payload, columns = '*' }) {
 
 async function updateRows({ table, filters = [], payload = {}, columns = '*' }) {
   table = safeTable(table)
-  const { clause, params } = buildWhere(filters)
   const updates = { ...payload }
   if ('updated_at' in updates || (table !== 'swachhlens_tasks' && table !== 'swachhlens_reports')) {
     updates.updated_at = updates.updated_at || new Date().toISOString()
   }
   const keys = Object.keys(updates)
   if (keys.length === 0) return { data: [] }
+
+  // Build SET clause: $1 … $N
   const setClause = keys.map((key, index) => `${key} = $${index + 1}`).join(', ')
-  const values = [...keys.map((key) => updates[key]), ...params]
-  const { rows } = await pool.query(`UPDATE ${table} SET ${setClause} ${clause} RETURNING *`, values)
+  const setValues = keys.map((key) => updates[key])
+
+  // Build WHERE clause with params offset past the SET params: $(N+1), $(N+2) …
+  const whereClauses = []
+  const whereValues = []
+  for (const filter of filters) {
+    const pos = keys.length + whereValues.length + 1
+    if (filter.type === 'eq') {
+      whereValues.push(filter.value)
+      whereClauses.push(`${filter.field} = $${pos}`)
+    } else if (filter.type === 'in') {
+      whereValues.push(filter.values)
+      whereClauses.push(`${filter.field} = ANY($${pos})`)
+    }
+  }
+  const whereClause = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : ''
+  const values = [...setValues, ...whereValues]
+
+  const { rows } = await pool.query(`UPDATE ${table} SET ${setClause} ${whereClause} RETURNING *`, values)
   return { data: rows.map((row) => projectRow(table, row, columns)) }
 }
 

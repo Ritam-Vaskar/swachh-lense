@@ -50,17 +50,26 @@ export default function ReportDrawer({ report, onClose, onChanged, toast }) {
   }
 
   async function approveReport() {
-    await updateReport(
-      { approval_status: 'Approved', status: 'Verified', citizen_update: 'Report approved. Assigning nearest crew.' },
-      'Report approved.',
-    )
+    try {
+      const res = await fetch(`http://localhost:3001/api/agents/approve/${report.id}`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast('Report approved and dispatched.', 'success')
+      // The realtime subscription in App.jsx will automatically refresh the UI
+    } catch (err) {
+      toast(err.message || 'Failed to approve report', 'error')
+    }
   }
 
   async function rejectReport() {
-    await updateReport(
-      { approval_status: 'Rejected', status: 'Closed', citizen_update: 'Report could not be verified and has been closed.' },
-      'Report rejected.',
-    )
+    try {
+      const res = await fetch(`http://localhost:3001/api/agents/reject/${report.id}`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast('Report rejected.', 'success')
+    } catch (err) {
+      toast(err.message || 'Failed to reject report', 'error')
+    }
   }
 
   async function autoAssignWorker() {

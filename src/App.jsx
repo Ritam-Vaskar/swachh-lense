@@ -111,12 +111,12 @@ function OperatorDashboard() {
     const reportSub = api
       .channel('reports-rt')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'swachhlens_reports' }, (payload) => {
-        if (payload.eventType === 'INSERT') {
+        if (payload.eventType === 'INSERT' && payload.new?.id) {
           setReports((r) => [payload.new, ...r])
           toast('New report received from citizen.', 'success')
-        } else if (payload.eventType === 'UPDATE') {
-          setReports((r) => r.map((x) => (x.id === payload.new.id ? payload.new : x)))
-        } else if (payload.eventType === 'DELETE') {
+        } else if (payload.eventType === 'UPDATE' && payload.new?.id) {
+          setReports((r) => r.map((x) => (x.id === payload.new.id ? { ...x, ...payload.new } : x)))
+        } else if (payload.eventType === 'DELETE' && payload.old?.id) {
           setReports((r) => r.filter((x) => x.id !== payload.old.id))
         }
       })

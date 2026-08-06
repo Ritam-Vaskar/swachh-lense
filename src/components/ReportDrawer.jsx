@@ -171,15 +171,28 @@ export default function ReportDrawer({ report, onClose, onChanged, toast }) {
 
           {ai && (
             <div className="detail-section">
-              <div className="detail-label">AI triage analysis</div>
+              <div className="detail-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                AI triage analysis
+                {ai.method && ai.method.includes('gemini') && (
+                  <span className="tag" style={{ background: 'var(--brand-soft)', color: 'var(--brand)', padding: '2px 6px', fontSize: 10, letterSpacing: '0.02em' }}>
+                    <Icon name="Sparkles" size={10} /> Powered by Gemini
+                  </span>
+                )}
+              </div>
               <div className="ai-result-card">
                 <div className="ai-row"><span className="muted">Detected category</span><strong>{ai.category}</strong></div>
                 <div className="ai-row"><span className="muted">Volume</span><strong>{ai.volume}</strong></div>
                 <div className="ai-row"><span className="muted">Severity</span><strong>{ai.severity_score}/100</strong></div>
                 <div className="ai-row"><span className="muted">Recommended team</span><strong>{ai.team_size}</strong></div>
                 <div className="ai-row"><span className="muted">Confidence</span><strong>{ai.confidence}%</strong></div>
-                <div className="ai-row"><span className="muted">Hazard</span><strong>{ai.hazard ? 'Yes' : 'No'}</strong></div>
-                <p className="ai-summary">{ai.summary}</p>
+                <div className="ai-row"><span className="muted">Hazard</span><strong>{ai.hazard_flag ? 'Yes' : 'No'}</strong></div>
+                {ai.reasoning && (
+                  <div className="ai-row" style={{ flexDirection: 'column', alignItems: 'flex-start', borderBottom: 'none', paddingBottom: 0 }}>
+                    <span className="muted" style={{ marginBottom: 4 }}>Reasoning</span>
+                    <strong style={{ fontSize: 13, lineHeight: 1.4 }}>{ai.reasoning}</strong>
+                  </div>
+                )}
+                <p className="ai-summary" style={{ marginTop: 12 }}>{ai.summary}</p>
               </div>
             </div>
           )}

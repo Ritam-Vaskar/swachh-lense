@@ -198,7 +198,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
             )}
 
             {step === 'done' && (
-              <DoneStep ref={submittedRef} analysis={analysis} onNew={reset} onTrack={() => setView('track')} />
+              <DoneStep referenceCode={submittedRef} analysis={analysis} onNew={reset} onTrack={() => setView('track')} />
             )}
           </div>
         )}
@@ -303,6 +303,7 @@ function ReviewStep({ photoUrl, analysis, category, setCategory, description, se
                 <div className="ai-row"><span className="muted">Severity score</span><strong>{analysis.severity_score ? `${analysis.severity_score}/100` : '—'}</strong></div>
                 <div className="ai-row"><span className="muted">Priority</span><span className="badge" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>{analysis.priority}</span></div>
                 {analysis.team_size && <div className="ai-row"><span className="muted">Recommended team</span><strong>{analysis.team_size} worker{analysis.team_size > 1 ? 's' : ''}</strong></div>}
+                <div className="ai-row"><span className="muted">Hazard flagged</span><strong>{analysis.hazard_flag ? 'Yes' : 'No'}</strong></div>
                 {analysis.summary && <p className="ai-summary">{analysis.summary}</p>}
               </>
             ) : (
@@ -359,13 +360,13 @@ function ReviewStep({ photoUrl, analysis, category, setCategory, description, se
   )
 }
 
-function DoneStep({ ref: refCode, analysis, onNew, onTrack }) {
+function DoneStep({ referenceCode, analysis, onNew, onTrack }) {
   return (
     <div className="done-card">
       <div className="done-icon"><Icon name="CheckCircle2" size={48} color="#16a34a" /></div>
       <h2>Report submitted!</h2>
       <p className="muted">Your reference code</p>
-      <div className="done-ref">{refCode}</div>
+      <div className="done-ref">{referenceCode}</div>
       <p className="muted">Save this to track your report status. The operations team has been notified.</p>
       {analysis && (
         <div className="done-summary">

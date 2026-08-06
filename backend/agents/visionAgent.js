@@ -107,7 +107,7 @@ Return ONLY the JSON object. No markdown, no code fences.`
   const mimeType = header.match(/:(.*?);/)?.[1] || 'image/jpeg'
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -118,7 +118,7 @@ Return ONLY the JSON object. No markdown, no code fences.`
             { inline_data: { mime_type: mimeType, data: base64Data } },
           ],
         }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 512 },
+        generationConfig: { temperature: 0.1, maxOutputTokens: 1024, responseMimeType: "application/json" },
       }),
     },
   )
@@ -133,7 +133,13 @@ Return ONLY the JSON object. No markdown, no code fences.`
 
   // Parse JSON from the model response
   const cleaned = rawText.replace(/```json|```/g, '').trim()
-  const parsed = JSON.parse(cleaned)
+  let parsed
+  try {
+    parsed = JSON.parse(cleaned)
+  } catch (err) {
+    console.error('[VisionAgent] JSON parse error. Raw output from Gemini:', rawText)
+    throw err
+  }
 
   // Derive priority from severity
   let priority = 'Low'

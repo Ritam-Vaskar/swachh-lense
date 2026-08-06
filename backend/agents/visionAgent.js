@@ -13,6 +13,7 @@
  */
 
 import { getPool } from '../models/database.js'
+import sharp from 'sharp'
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
 
@@ -87,6 +88,20 @@ function heuristicAnalysis({ description = '', category = '', hazard_flag = fals
 // Real Gemini Vision analysis (active when GEMINI_API_KEY is set)
 // ---------------------------------------------------------------------------
 
+/**
+ * Resize and compress a base64 image data URL to max 768px on the longest side
+ * and JPEG quality 70 to minimize Gemini input token usage.
+ */
+async function resizeImageDataUrl(dataUrl) {
+  const [header, base64Data] = dataUrl.split(',')
+  const buffer = Buffer.from(base64Data, 'base64')
+  const resized = await sharp(buffer)
+    .resize({ width: 768, height: 768, fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 70 })
+    .toBuffer()
+  return `data:image/jpeg;base64,${resized.toString('base64')}`
+}
+
 async function analyzeWithGemini(imageDataUrl, description = '', category = '') {
   const prompt = `You are a waste management AI analyst. Analyze this image and return a JSON object with EXACTLY these fields:
 {
@@ -103,9 +118,18 @@ async function analyzeWithGemini(imageDataUrl, description = '', category = '') 
 Context from reporter: "${description || 'No description provided'}". ${category ? `Suggested category: ${category}.` : ''}
 Return ONLY the JSON object. No markdown, no code fences.`
 
+  // Resize image before sending to Gemini to avoid token budget issues
+  let processedDataUrl = imageDataUrl
+  try {
+    processedDataUrl = await resizeImageDataUrl(imageDataUrl)
+    console.log('[VisionAgent] Image resized for Gemini.')
+  } catch (err) {
+    console.warn('[VisionAgent] Image resize failed, using original:', err.message)
+  }
+
   // Extract base64 data from data URL
-  const [header, base64Data] = imageDataUrl.split(',')
-  const mimeType = header.match(/:(.*?);/)?.[1] || 'image/jpeg'
+  const [header, base64Data] = processedDataUrl.split(',')
+  const mimeType = 'image/jpeg'
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`,
@@ -119,7 +143,7 @@ Return ONLY the JSON object. No markdown, no code fences.`
             { inline_data: { mime_type: mimeType, data: base64Data } },
           ],
         }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 1024, responseMimeType: "application/json" },
+        generationConfig: { temperature: 0.1, maxOutputTokens: 4096, responseMimeType: "application/json" },
       }),
     },
   )
@@ -130,16 +154,67 @@ Return ONLY the JSON object. No markdown, no code fences.`
   }
 
   const result = await response.json()
+  
+  if (result.candidates?.[0]?.finishReason === 'SAFETY') {
+    throw new Error('Gemini blocked the response due to safety guidelines.')
+  }
+  
   const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text || ''
+  if (!rawText) {
+    throw new Error('Gemini returned an empty response. Raw result: ' + JSON.stringify(result))
+  }
 
-  // Parse JSON from the model response
-  const cleaned = rawText.replace(/```json|```/g, '').trim()
+  // Sanitize and parse JSON from the model response
+  // Gemini sometimes uses Unicode smart quotes or other special chars inside strings
+  const stripped = rawText.replace(/```json|```/g, '').trim()
+
+  // Replace smart/curly quotes with standard ASCII quotes
+  const sanitized = stripped
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')  // curly double quotes → "
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")  // curly single quotes → '
+    .replace(/[\u2013\u2014]/g, '-')               // em/en dashes → -
+    .replace(/[\u2026]/g, '...')                   // ellipsis → ...
+    .replace(/[\r\n]+/g, ' ')                      // collapse newlines within strings
+
   let parsed
   try {
-    parsed = JSON.parse(cleaned)
+    parsed = JSON.parse(sanitized)
   } catch (err) {
+    // Last resort: extract each field individually with regex
     console.error('[VisionAgent] JSON parse error. Raw output from Gemini:', rawText)
-    throw err
+    console.error('[VisionAgent] Attempting field-by-field extraction...')
+    try {
+      const extract = (key, fallback) => {
+        const m = stripped.match(new RegExp(`"${key}"\\s*:\\s*([^,}\\n]+)`))
+        return m ? m[1].trim().replace(/^"|"$/g, '').replace(/,$/, '') : fallback
+      }
+      const extractBool = (key, fallback) => {
+        const m = stripped.match(new RegExp(`"${key}"\\s*:\\s*(true|false)`))
+        return m ? m[1] === 'true' : fallback
+      }
+      const extractNum = (key, fallback) => {
+        const m = stripped.match(new RegExp(`"${key}"\\s*:\\s*(\\d+)`))
+        return m ? parseInt(m[1], 10) : fallback
+      }
+      const extractStr = (key, fallback) => {
+        const m = stripped.match(new RegExp(`"${key}"\\s*:\\s*"([^"]*)"`, 's'))
+        return m ? m[1] : fallback
+      }
+      parsed = {
+        is_waste: extractBool('is_waste', true),
+        category: extractStr('category', 'General waste'),
+        volume: extractStr('volume', 'Medium'),
+        hazard_flag: extractBool('hazard_flag', false),
+        severity_score: extractNum('severity_score', 50),
+        team_size: extractNum('team_size', 1),
+        confidence: extractNum('confidence', 60),
+        reasoning: extractStr('reasoning', ''),
+        summary: extractStr('summary', ''),
+      }
+      console.log('[VisionAgent] Field extraction succeeded:', parsed)
+    } catch (e2) {
+      throw new Error('Gemini returned unparseable JSON: ' + err.message)
+    }
   }
 
   // Derive priority from severity
@@ -161,21 +236,13 @@ Return ONLY the JSON object. No markdown, no code fences.`
 // ---------------------------------------------------------------------------
 
 export async function analyzeImageData(imageDataUrl, description, category) {
-  let analysis
   if (GEMINI_API_KEY && imageDataUrl && imageDataUrl.startsWith('data:')) {
-    try {
-      console.log('[VisionAgent] Running Gemini Vision analysis...')
-      analysis = await analyzeWithGemini(imageDataUrl, description, category)
-    } catch (err) {
-      console.error('[VisionAgent] Gemini call failed, falling back to heuristic:', err.message)
-      analysis = heuristicAnalysis({ description, category })
-      analysis.is_waste = true // fallback assumes it is waste if Gemini fails
-    }
+    console.log('[VisionAgent] Running Gemini Vision analysis...')
+    const analysis = await analyzeWithGemini(imageDataUrl, description, category)
+    return analysis
   } else {
-    analysis = heuristicAnalysis({ description, category })
-    analysis.is_waste = true
+    throw new Error('Missing Gemini API key or invalid image data.')
   }
-  return analysis
 }
 
 export async function runVisionAgent(reportId) {

@@ -72,9 +72,9 @@ export default function CitizenPortal({ onBackToSignIn }) {
     setUploadedImageUrl(null)
   }
 
-  async function analyzePhoto() {
+  async function submitReport() {
     if (!photo) return
-    setStep('analyzing')
+    setStep('analyzing') // reusing analyzing card for unified step
 
     let urlToUse = uploadedImageUrl
     if (!urlToUse) {
@@ -89,6 +89,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
     }
 
     try {
+      // 1. Synchronous AI Analysis
       const res = await fetch(`${API_BASE}/api/agents/vision/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -98,55 +99,42 @@ export default function CitizenPortal({ onBackToSignIn }) {
       if (!res.ok) throw new Error(data.error || 'Failed to analyze')
 
       setAnalysis(data.analysis)
+
+      // 2. Reject if Spam
       if (data.analysis.is_waste === false) {
         setStep('rejected')
-      } else {
-        if (data.analysis.category) setCategory(data.analysis.category)
-        setStep('review')
+        return
       }
-    } catch (err) {
-      showToast('AI analysis failed. You can still submit manually.', 'error')
-      setStep('review')
-    }
-  }
 
-  async function submitReport() {
-    setStep('submitting')
+      setStep('submitting')
 
-    try {
+      // 3. Submit directly to DB
       const result = await callIntakeAgent({
-        category: category || '',
+        category: data.analysis.category || category || '',
         location: gps ? `GPS ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : '',
         latitude: gps?.lat ?? null,
         longitude: gps?.lng ?? null,
         description: description || '',
         resident_name: 'Citizen',
         citizen_phone: phone,
-        image_url: uploadedImageUrl,
+        image_url: urlToUse,
         source: 'citizen',
         zone: 'Central',
-        ai_analysis: analysis
+        ai_analysis: data.analysis
       })
 
-      // Store reference in localStorage for tracking
       const ref = result.report.reference_code
       const key = 'swachhlens_citizen_refs'
       const refs = JSON.parse(localStorage.getItem(key) || '[]')
       refs.push(ref)
       localStorage.setItem(key, JSON.stringify(refs))
 
-      // Show a placeholder analysis object for the Done screen
-      setAnalysis({
-        category: result.report.category,
-        priority: result.report.priority,
-        autoApproved: result.report.approval_status === 'Auto-approved',
-      })
       setSubmittedRef(ref)
       setStep('done')
       loadMyReports()
     } catch (err) {
-      showToast(err.message || 'Could not submit report. Please try again.', 'error')
-      setStep('review')
+      showToast(err.message || 'Error processing report. Please try again.', 'error')
+      setStep('capture')
     }
   }
 
@@ -191,8 +179,10 @@ export default function CitizenPortal({ onBackToSignIn }) {
                 setDescription={setDescription}
                 category={category}
                 setCategory={setCategory}
+                phone={phone}
+                setPhone={setPhone}
                 onPhoto={handlePhoto}
-                onNext={analyzePhoto}
+                onSubmit={submitReport}
               />
             )}
 
@@ -204,21 +194,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
               </div>
             )}
 
-            {step === 'review' && (
-              <ReviewStep
-                photoUrl={photoUrl}
-                analysis={analysis}
-                category={category}
-                setCategory={setCategory}
-                description={description}
-                setDescription={setDescription}
-                phone={phone}
-                setPhone={setPhone}
-                gps={gps}
-                onSubmit={submitReport}
-                onBack={() => setStep('capture')}
-              />
-            )}
+            {step === 'review' && null /* Step removed for 1-click submission */}
 
             {step === 'rejected' && (
               <div className="analyzing-card" style={{ padding: '40px 20px', textAlign: 'center' }}>
@@ -258,7 +234,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
   )
 }
 
-function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, category, setCategory, onPhoto, onNext }) {
+function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, category, setCategory, phone, setPhone, onPhoto, onSubmit }) {
   return (
     <div className="capture-grid">
       <div className="capture-left">
@@ -297,6 +273,10 @@ function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, cat
                 {REPORT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
+            <div className="form-group">
+              <label>Your phone (for updates, optional)</label>
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Mobile number" />
+            </div>
             <div className="gps-status">
               {gps ? (
                 <>
@@ -332,8 +312,8 @@ function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, cat
             )}
             
             {photoUrl && (
-              <button className="btn btn-primary" style={{ width: '100%', marginTop: 20, padding: 14, fontSize: 16 }} onClick={onNext}>
-                Analyze &amp; Continue <Icon name="ArrowRight" size={16} />
+              <button className="btn btn-primary" style={{ width: '100%', marginTop: 20, padding: 14, fontSize: 16 }} onClick={onSubmit}>
+                <Icon name="Sparkles" size={16} /> Analyze &amp; Submit
               </button>
             )}
           </div>
@@ -425,10 +405,16 @@ function DoneStep({ referenceCode, analysis, onNew, onTrack }) {
       <div className="done-ref">{referenceCode}</div>
       <p className="muted">Save this to track your report status. The operations team has been notified.</p>
       {analysis && (
-        <div className="done-summary">
-          <div className="ai-row"><span className="muted">Category</span><strong>{analysis.category}</strong></div>
-          <div className="ai-row"><span className="muted">Priority</span><strong>{analysis.priority}</strong></div>
-          <div className="ai-row"><span className="muted">Status</span><strong>{analysis.autoApproved ? 'Auto-approved' : 'Pending review'}</strong></div>
+        <div className="done-summary" style={{ textAlign: 'left', marginTop: 20, padding: 20 }}>
+          <h4 style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="Sparkles" size={16} color="var(--accent)" /> AI Analysis Results</h4>
+          
+          <ul style={{ paddingLeft: 20, fontSize: 14, lineHeight: 1.6, color: 'var(--text)' }}>
+            <li><strong>Decision:</strong> Valid waste report ({analysis.category})</li>
+            {analysis.reasoning && <li><strong>Reasoning:</strong> {analysis.reasoning}</li>}
+            {analysis.summary && <li><strong>Summary for Crew:</strong> {analysis.summary}</li>}
+            <li><strong>Priority Assigned:</strong> {analysis.priority}</li>
+            <li><strong>Status:</strong> {analysis.autoApproved ? 'Auto-approved for immediate cleanup' : 'Pending operator review'}</li>
+          </ul>
         </div>
       )}
       <div className="row-gap" style={{ justifyContent: 'center', marginTop: 20 }}>

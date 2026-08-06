@@ -1,10 +1,22 @@
 import { useEffect, useState } from 'react'
 import { api, REPORT_CATEGORIES, generateReferenceCode } from '../lib/api/index.js'
-import { analyzeReport } from '../lib/ai'
 import { uploadEvidence } from '../lib/storage'
 import { Icon, Toast } from './ui'
 import MapView from './MapView'
 import { statusColors, formatRelativeTime, getSlaStatus } from '../lib/constants'
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
+
+async function callIntakeAgent(payload) {
+  const res = await fetch(`${API_BASE}/api/agents/intake`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'Intake agent failed')
+  return data
+}
 
 const STEPS = ['capture', 'analyzing', 'review', 'submitting', 'done']
 
@@ -56,61 +68,57 @@ export default function CitizenPortal({ onBackToSignIn }) {
   function handlePhoto(file) {
     setPhoto(file)
     setPhotoUrl(URL.createObjectURL(file))
-    setStep('analyzing')
-    // Simulate AI analysis delay
-    setTimeout(() => {
-      const result = analyzeReport({ description, category, hazard_flag: false })
-      setAnalysis(result)
-      if (result.category) setCategory(result.category)
-      setStep('review')
-    }, 1600)
+    // Move directly to review — real AI analysis runs server-side after submission
+    setStep('review')
   }
 
   async function submitReport() {
     setStep('submitting')
+
+    // Step 1: Upload photo
     let imageUrl = null
     if (photo) {
-      const { url, error } = await uploadEvidence(photo, 'citizen')
-      if (!error) imageUrl = url
+      const { url, error: upErr } = await uploadEvidence(photo, 'citizen')
+      if (!upErr && url) imageUrl = url
     }
-    const ref = generateReferenceCode()
-    const row = {
-      reference_code: ref,
-      category: analysis.category || category,
-      location: gps ? `GPS ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : 'Location unknown',
-      zone: 'Central',
-      latitude: gps?.lat,
-      longitude: gps?.lng,
-      volume: analysis.volume,
-      severity_score: analysis.severity_score,
-      priority: analysis.priority,
-      hazard_flag: analysis.hazard,
-      confidence: analysis.confidence,
-      team_size: analysis.team_size,
-      description: description || analysis.summary,
-      resident_name: 'Citizen',
-      citizen_phone: phone,
-      image_url: imageUrl,
-      ai_analysis: analysis,
-      status: 'New',
-      approval_status: analysis.autoApproved ? 'Auto-approved' : 'Pending',
-      citizen_update: analysis.autoApproved
-        ? 'Report auto-approved and queued for worker assignment.'
-        : 'Report received and awaiting operator review.',
-    }
-    const { data, error } = await api.from('swachhlens_reports').insert(row).select().single()
-    if (error) {
-      showToast('Could not submit report. Please try again.', 'error')
+
+    // Step 2: Call Intake Agent — backend handles validation, DB insert, and Gemini Vision
+    try {
+      const result = await callIntakeAgent({
+        category: category || '',
+        location: gps ? `GPS ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : '',
+        latitude: gps?.lat ?? null,
+        longitude: gps?.lng ?? null,
+        description: description || '',
+        resident_name: 'Citizen',
+        citizen_phone: phone,
+        image_url: imageUrl,
+        source: 'citizen',
+        zone: 'Central',
+        volume: 'Medium', // Vision agent will override with real value
+        hazard_flag: false, // Vision agent will detect
+      })
+
+      // Store reference in localStorage for tracking
+      const ref = result.report.reference_code
+      const key = 'swachhlens_citizen_refs'
+      const refs = JSON.parse(localStorage.getItem(key) || '[]')
+      refs.push(ref)
+      localStorage.setItem(key, JSON.stringify(refs))
+
+      // Show a placeholder analysis object for the Done screen
+      setAnalysis({
+        category: result.report.category,
+        priority: result.report.priority,
+        autoApproved: result.report.approval_status === 'Auto-approved',
+      })
+      setSubmittedRef(ref)
+      setStep('done')
+      loadMyReports()
+    } catch (err) {
+      showToast(err.message || 'Could not submit report. Please try again.', 'error')
       setStep('review')
-      return
     }
-    const key = 'swachhlens_citizen_refs'
-    const refs = JSON.parse(localStorage.getItem(key) || '[]')
-    refs.push(ref)
-    localStorage.setItem(key, JSON.stringify(refs))
-    setSubmittedRef(ref)
-    setStep('done')
-    loadMyReports()
   }
 
   function reset() {
@@ -165,7 +173,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
               </div>
             )}
 
-            {step === 'review' && analysis && (
+            {step === 'review' && (
               <ReviewStep
                 photoUrl={photoUrl}
                 analysis={analysis}
@@ -185,7 +193,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
               <div className="analyzing-card">
                 <div className="spinner" />
                 <h3>Submitting your report…</h3>
-                <p className="muted">Uploading evidence and sending to the operations dashboard.</p>
+                <p className="muted">Uploading evidence and sending to the AI analysis pipeline. You’ll receive a reference code in a moment.</p>
               </div>
             )}
 
@@ -284,18 +292,25 @@ function ReviewStep({ photoUrl, analysis, category, setCategory, description, se
   return (
     <div className="review-grid">
       <div className="panel">
-        <div className="panel-header"><h3 className="panel-title">AI analysis result</h3></div>
+        <div className="panel-header"><h3 className="panel-title">Evidence preview</h3></div>
         <div className="panel-body">
           <div className="ai-result-card">
             {photoUrl && <div className="image-placeholder" style={{ marginBottom: 14 }}><img src={photoUrl} alt="Evidence" /></div>}
-            <div className="ai-row"><span className="muted">Detected category</span><strong>{analysis.category}</strong></div>
-            <div className="ai-row"><span className="muted">Estimated volume</span><strong>{analysis.volume}</strong></div>
-            <div className="ai-row"><span className="muted">Severity score</span><strong>{analysis.severity_score}/100</strong></div>
-            <div className="ai-row"><span className="muted">Priority</span><span className="badge" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>{analysis.priority}</span></div>
-            <div className="ai-row"><span className="muted">Recommended team</span><strong>{analysis.team_size} worker{analysis.team_size > 1 ? 's' : ''}</strong></div>
-            <div className="ai-row"><span className="muted">Hazard flagged</span><strong>{analysis.hazard ? 'Yes' : 'No'}</strong></div>
-            <div className="ai-row"><span className="muted">AI confidence</span><strong>{analysis.confidence}%</strong></div>
-            <p className="ai-summary">{analysis.summary}</p>
+            {analysis ? (
+              <>
+                <div className="ai-row"><span className="muted">Detected category</span><strong>{analysis.category}</strong></div>
+                <div className="ai-row"><span className="muted">Estimated volume</span><strong>{analysis.volume || '—'}</strong></div>
+                <div className="ai-row"><span className="muted">Severity score</span><strong>{analysis.severity_score ? `${analysis.severity_score}/100` : '—'}</strong></div>
+                <div className="ai-row"><span className="muted">Priority</span><span className="badge" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>{analysis.priority}</span></div>
+                {analysis.team_size && <div className="ai-row"><span className="muted">Recommended team</span><strong>{analysis.team_size} worker{analysis.team_size > 1 ? 's' : ''}</strong></div>}
+                {analysis.summary && <p className="ai-summary">{analysis.summary}</p>}
+              </>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                <Icon name="Sparkles" size={16} />
+                <span>AI analysis will run automatically after you submit. Results appear in the operations dashboard within seconds.</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -306,6 +321,7 @@ function ReviewStep({ photoUrl, analysis, category, setCategory, description, se
           <div className="form-group">
             <label>Adjust category if needed</label>
             <select value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="">Let AI decide</option>
               {REPORT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
@@ -317,7 +333,18 @@ function ReviewStep({ photoUrl, analysis, category, setCategory, description, se
             <label>Your phone (for updates, optional)</label>
             <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Mobile number" />
           </div>
-          {analysis.autoApproved && (
+          {gps ? (
+            <div className="gps-status" style={{ marginBottom: 8 }}>
+              <Icon name="MapPin" size={14} color="#16a34a" />
+              <span>GPS confirmed: {gps.lat.toFixed(4)}, {gps.lng.toFixed(4)}</span>
+            </div>
+          ) : (
+            <div className="gps-status" style={{ marginBottom: 8 }}>
+              <Icon name="MapPinOff" size={14} color="#f59e0b" />
+              <span>No GPS — report will not have a map pin.</span>
+            </div>
+          )}
+          {analysis?.autoApproved && (
             <div className="auto-approve-banner">
               <Icon name="Zap" size={16} /> High-severity hazard — this report will be auto-approved for faster response.
             </div>

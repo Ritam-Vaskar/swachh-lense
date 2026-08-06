@@ -1,8 +1,20 @@
 import { useEffect, useState } from 'react'
-import { api, REPORT_CATEGORIES, ZONES, VOLUME_LEVELS, SEVERITY_BY_VOLUME, PRIORITY_BY_SEVERITY, generateReferenceCode } from '../lib/api/index.js'
-import { analyzeReport } from '../lib/ai'
+import { api, REPORT_CATEGORIES, ZONES, VOLUME_LEVELS } from '../lib/api/index.js'
 import { uploadEvidence } from '../lib/storage'
 import { Icon } from './ui'
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
+
+async function callIntakeAgent(payload) {
+  const res = await fetch(`${API_BASE}/api/agents/intake`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'Intake agent failed')
+  return data
+}
 
 export default function NewReportModal({ open, onClose, onCreated }) {
   const [form, setForm] = useState({
@@ -22,6 +34,7 @@ export default function NewReportModal({ open, onClose, onCreated }) {
   const [analysis, setAnalysis] = useState(null)
   const [showAnalysis, setShowAnalysis] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [pipelineStatus, setPipelineStatus] = useState('') // '', 'uploading', 'analyzing', 'done'
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -52,9 +65,18 @@ export default function NewReportModal({ open, onClose, onCreated }) {
     setPhotoUrl(URL.createObjectURL(file))
   }
 
+  // Preview-only heuristic analysis so operator can see rough numbers before submitting.
+  // The real Gemini-powered analysis runs server-side after submission.
   function runAnalysis() {
-    const result = analyzeReport({ description: form.description, category: form.category, hazard_flag: form.hazard_flag })
-    setAnalysis(result)
+    const volume = form.volume || 'Medium'
+    const volumeScore = { Small: 30, Medium: 50, Large: 75, Overflowing: 95 }[volume] || 50
+    const severity = Math.min(100, volumeScore + (form.hazard_flag ? 10 : 0))
+    let priority = 'Low'
+    if (severity >= 85) priority = 'Critical'
+    else if (severity >= 65) priority = 'High'
+    else if (severity >= 40) priority = 'Medium'
+    const team_size = volume === 'Overflowing' ? 4 : volume === 'Large' ? 3 : volume === 'Medium' ? 2 : 1
+    setAnalysis({ severity_score: severity, priority, team_size, confidence: '—', summary: `Quick estimate: ${priority} priority, team of ${team_size}. Final AI analysis runs after submission.` })
     setShowAnalysis(true)
   }
 
@@ -64,41 +86,39 @@ export default function NewReportModal({ open, onClose, onCreated }) {
     setSaving(true)
     setError('')
 
+    // Step 1: Upload photo first if provided
     let imageUrl = form.image_url || null
     if (photo) {
+      setPipelineStatus('uploading')
       const { url } = await uploadEvidence(photo, 'operator')
       if (url) imageUrl = url
     }
 
-    const ai = analysis || analyzeReport({ description: form.description, category: form.category, hazard_flag: form.hazard_flag })
-    const severity = ai.severity_score || SEVERITY_BY_VOLUME[form.volume]
-    const priority = ai.priority || PRIORITY_BY_SEVERITY(severity)
-
-    const row = {
-      reference_code: generateReferenceCode(),
-      category: form.category,
-      location: form.location.trim(),
-      zone: form.zone,
-      latitude: gps?.lat,
-      longitude: gps?.lng,
-      volume: form.volume,
-      severity_score: severity,
-      priority,
-      hazard_flag: form.hazard_flag,
-      description: form.description.trim(),
-      resident_name: form.resident_name.trim() || 'Operator',
-      citizen_phone: form.phone,
-      image_url: imageUrl,
-      ai_analysis: ai,
-      team_size: ai.team_size || 1,
-      status: 'New',
-      approval_status: 'Approved',
-      citizen_update: 'Report logged by operator and queued for assignment.',
+    // Step 2: Call Intake Agent — validation, DB insert, and async Vision analysis
+    setPipelineStatus('analyzing')
+    try {
+      const result = await callIntakeAgent({
+        category: form.category,
+        location: form.location.trim(),
+        zone: form.zone,
+        latitude: gps?.lat ?? null,
+        longitude: gps?.lng ?? null,
+        volume: form.volume,
+        hazard_flag: form.hazard_flag,
+        description: form.description.trim(),
+        resident_name: form.resident_name.trim() || 'Operator',
+        citizen_phone: form.phone,
+        image_url: imageUrl,
+        source: 'operator',
+      })
+      setPipelineStatus('done')
+      setSaving(false)
+      onCreated(result.report)
+    } catch (err) {
+      setError(err.message || 'Could not save the report.')
+      setSaving(false)
+      setPipelineStatus('')
     }
-    const { data, error: dbError } = await api.from('swachhlens_reports').insert(row).select().single()
-    setSaving(false)
-    if (dbError) { setError('Could not save the report.'); return }
-    onCreated(data)
   }
 
   if (!open) return null
@@ -190,7 +210,15 @@ export default function NewReportModal({ open, onClose, onCreated }) {
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Create report'}</button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving
+                ? pipelineStatus === 'uploading'
+                  ? <><Icon name="Upload" size={14} /> Uploading photo…</>
+                  : pipelineStatus === 'analyzing'
+                    ? <><Icon name="Sparkles" size={14} /> AI analyzing…</>
+                    : 'Saving…'
+                : <><Icon name="Plus" size={14} /> Create report</>}
+            </button>
           </div>
         </form>
       </div>

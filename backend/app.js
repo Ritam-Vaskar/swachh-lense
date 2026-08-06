@@ -4,6 +4,7 @@ import healthRoutes from './routes/healthRoutes.js'
 import queryRoutes from './routes/queryRoutes.js'
 import authRoutes from './routes/authRoutes.js'
 import storageRoutes from './routes/storageRoutes.js'
+import agentRoutes from './routes/agentRoutes.js'
 
 export function createApp() {
   const app = express()
@@ -15,6 +16,8 @@ export function createApp() {
   app.use('/api/query', queryRoutes)
   app.use('/api/auth', authRoutes)
   app.use('/api/storage', storageRoutes)
+  // Agentic pipeline endpoints — one route file, mounted per phase
+  app.use('/api/agents', agentRoutes)
 
   return app
 }

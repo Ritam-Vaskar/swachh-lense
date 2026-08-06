@@ -1,10 +1,22 @@
 import { useEffect, useState } from 'react'
 import { api, REPORT_CATEGORIES, generateReferenceCode } from '../lib/api/index.js'
-import { analyzeReport } from '../lib/ai'
 import { uploadEvidence } from '../lib/storage'
 import { Icon, Toast } from './ui'
 import MapView from './MapView'
 import { statusColors, formatRelativeTime, getSlaStatus } from '../lib/constants'
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
+
+async function callIntakeAgent(payload) {
+  const res = await fetch(`${API_BASE}/api/agents/intake`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'Intake agent failed')
+  return data
+}
 
 const STEPS = ['capture', 'analyzing', 'review', 'submitting', 'done']
 
@@ -18,6 +30,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
   const [category, setCategory] = useState('')
   const [phone, setPhone] = useState('')
   const [analysis, setAnalysis] = useState(null)
+  const [uploadedImageUrl, setUploadedImageUrl] = useState(null)
   const [submittedRef, setSubmittedRef] = useState(null)
   const [myReports, setMyReports] = useState([])
   const [toast, setToast] = useState(null)
@@ -56,61 +69,73 @@ export default function CitizenPortal({ onBackToSignIn }) {
   function handlePhoto(file) {
     setPhoto(file)
     setPhotoUrl(URL.createObjectURL(file))
-    setStep('analyzing')
-    // Simulate AI analysis delay
-    setTimeout(() => {
-      const result = analyzeReport({ description, category, hazard_flag: false })
-      setAnalysis(result)
-      if (result.category) setCategory(result.category)
-      setStep('review')
-    }, 1600)
+    setUploadedImageUrl(null)
   }
 
   async function submitReport() {
-    setStep('submitting')
-    let imageUrl = null
-    if (photo) {
+    if (!photo) return
+    setStep('analyzing') // reusing analyzing card for unified step
+
+    let urlToUse = uploadedImageUrl
+    if (!urlToUse) {
       const { url, error } = await uploadEvidence(photo, 'citizen')
-      if (!error) imageUrl = url
+      if (error || !url) {
+        showToast('Failed to upload photo.', 'error')
+        setStep('capture')
+        return
+      }
+      urlToUse = url
+      setUploadedImageUrl(url)
     }
-    const ref = generateReferenceCode()
-    const row = {
-      reference_code: ref,
-      category: analysis.category || category,
-      location: gps ? `GPS ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : 'Location unknown',
-      zone: 'Central',
-      latitude: gps?.lat,
-      longitude: gps?.lng,
-      volume: analysis.volume,
-      severity_score: analysis.severity_score,
-      priority: analysis.priority,
-      hazard_flag: analysis.hazard,
-      confidence: analysis.confidence,
-      team_size: analysis.team_size,
-      description: description || analysis.summary,
-      resident_name: 'Citizen',
-      citizen_phone: phone,
-      image_url: imageUrl,
-      ai_analysis: analysis,
-      status: 'New',
-      approval_status: analysis.autoApproved ? 'Auto-approved' : 'Pending',
-      citizen_update: analysis.autoApproved
-        ? 'Report auto-approved and queued for worker assignment.'
-        : 'Report received and awaiting operator review.',
+
+    try {
+      // 1. Synchronous AI Analysis
+      const res = await fetch(`${API_BASE}/api/agents/vision/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: urlToUse, description, category }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to analyze')
+
+      setAnalysis(data.analysis)
+
+      // 2. Reject if Spam
+      if (data.analysis.is_waste === false) {
+        setStep('rejected')
+        return
+      }
+
+      setStep('submitting')
+
+      // 3. Submit directly to DB
+      const result = await callIntakeAgent({
+        category: data.analysis.category || category || '',
+        location: gps ? `GPS ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : '',
+        latitude: gps?.lat ?? null,
+        longitude: gps?.lng ?? null,
+        description: description || '',
+        resident_name: 'Citizen',
+        citizen_phone: phone,
+        image_url: urlToUse,
+        source: 'citizen',
+        zone: 'Central',
+        ai_analysis: data.analysis
+      })
+
+      const ref = result.report.reference_code
+      const key = 'swachhlens_citizen_refs'
+      const refs = JSON.parse(localStorage.getItem(key) || '[]')
+      refs.push(ref)
+      localStorage.setItem(key, JSON.stringify(refs))
+
+      setSubmittedRef(ref)
+      setStep('done')
+      loadMyReports()
+    } catch (err) {
+      showToast(err.message || 'Error processing report. Please try again.', 'error')
+      setStep('capture')
     }
-    const { data, error } = await api.from('swachhlens_reports').insert(row).select().single()
-    if (error) {
-      showToast('Could not submit report. Please try again.', 'error')
-      setStep('review')
-      return
-    }
-    const key = 'swachhlens_citizen_refs'
-    const refs = JSON.parse(localStorage.getItem(key) || '[]')
-    refs.push(ref)
-    localStorage.setItem(key, JSON.stringify(refs))
-    setSubmittedRef(ref)
-    setStep('done')
-    loadMyReports()
   }
 
   function reset() {
@@ -121,6 +146,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
     setCategory('')
     setAnalysis(null)
     setSubmittedRef(null)
+    setUploadedImageUrl(null)
   }
 
   return (
@@ -153,7 +179,10 @@ export default function CitizenPortal({ onBackToSignIn }) {
                 setDescription={setDescription}
                 category={category}
                 setCategory={setCategory}
+                phone={phone}
+                setPhone={setPhone}
                 onPhoto={handlePhoto}
+                onSubmit={submitReport}
               />
             )}
 
@@ -165,32 +194,36 @@ export default function CitizenPortal({ onBackToSignIn }) {
               </div>
             )}
 
-            {step === 'review' && analysis && (
-              <ReviewStep
-                photoUrl={photoUrl}
-                analysis={analysis}
-                category={category}
-                setCategory={setCategory}
-                description={description}
-                setDescription={setDescription}
-                phone={phone}
-                setPhone={setPhone}
-                gps={gps}
-                onSubmit={submitReport}
-                onBack={reset}
-              />
+            {step === 'review' && null /* Step removed for 1-click submission */}
+
+            {step === 'rejected' && (
+              <div className="analyzing-card" style={{ padding: '40px 20px', textAlign: 'center' }}>
+                <Icon name="XCircle" size={48} color="#ef4444" />
+                <h3 style={{ marginTop: 16 }}>Image Rejected</h3>
+                <p className="muted" style={{ maxWidth: 400, margin: '10px auto' }}>
+                  Our AI determined this image does not depict waste or is unrelated to city cleanliness.
+                </p>
+                {analysis?.reasoning && (
+                  <div style={{ background: 'var(--surface-muted)', padding: 12, borderRadius: 8, marginTop: 16, textAlign: 'left', fontSize: 14 }}>
+                    <strong>AI Reasoning:</strong> {analysis.reasoning}
+                  </div>
+                )}
+                <button className="btn btn-primary" style={{ marginTop: 24 }} onClick={() => { setStep('capture'); setPhoto(null); setPhotoUrl(null) }}>
+                  <Icon name="Camera" size={16} /> Retake Photo
+                </button>
+              </div>
             )}
 
             {step === 'submitting' && (
               <div className="analyzing-card">
                 <div className="spinner" />
                 <h3>Submitting your report…</h3>
-                <p className="muted">Uploading evidence and sending to the operations dashboard.</p>
+                <p className="muted">Uploading evidence and sending to the AI analysis pipeline. You’ll receive a reference code in a moment.</p>
               </div>
             )}
 
             {step === 'done' && (
-              <DoneStep ref={submittedRef} analysis={analysis} onNew={reset} onTrack={() => setView('track')} />
+              <DoneStep referenceCode={submittedRef} analysis={analysis} onNew={reset} onTrack={() => setView('track')} />
             )}
           </div>
         )}
@@ -201,7 +234,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
   )
 }
 
-function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, category, setCategory, onPhoto }) {
+function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, category, setCategory, phone, setPhone, onPhoto, onSubmit }) {
   return (
     <div className="capture-grid">
       <div className="capture-left">
@@ -240,6 +273,10 @@ function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, cat
                 {REPORT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
+            <div className="form-group">
+              <label>Your phone (for updates, optional)</label>
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Mobile number" />
+            </div>
             <div className="gps-status">
               {gps ? (
                 <>
@@ -273,6 +310,12 @@ function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, cat
                 <div><Icon name="MapPinOff" size={28} /><div style={{ fontSize: 13, marginTop: 6 }}>Waiting for GPS…</div></div>
               </div>
             )}
+            
+            {photoUrl && (
+              <button className="btn btn-primary" style={{ width: '100%', marginTop: 20, padding: 14, fontSize: 16 }} onClick={onSubmit}>
+                <Icon name="Sparkles" size={16} /> Analyze &amp; Submit
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -284,18 +327,27 @@ function ReviewStep({ photoUrl, analysis, category, setCategory, description, se
   return (
     <div className="review-grid">
       <div className="panel">
-        <div className="panel-header"><h3 className="panel-title">AI analysis result</h3></div>
+        <div className="panel-header"><h3 className="panel-title">Evidence preview</h3></div>
         <div className="panel-body">
           <div className="ai-result-card">
             {photoUrl && <div className="image-placeholder" style={{ marginBottom: 14 }}><img src={photoUrl} alt="Evidence" /></div>}
-            <div className="ai-row"><span className="muted">Detected category</span><strong>{analysis.category}</strong></div>
-            <div className="ai-row"><span className="muted">Estimated volume</span><strong>{analysis.volume}</strong></div>
-            <div className="ai-row"><span className="muted">Severity score</span><strong>{analysis.severity_score}/100</strong></div>
-            <div className="ai-row"><span className="muted">Priority</span><span className="badge" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>{analysis.priority}</span></div>
-            <div className="ai-row"><span className="muted">Recommended team</span><strong>{analysis.team_size} worker{analysis.team_size > 1 ? 's' : ''}</strong></div>
-            <div className="ai-row"><span className="muted">Hazard flagged</span><strong>{analysis.hazard ? 'Yes' : 'No'}</strong></div>
-            <div className="ai-row"><span className="muted">AI confidence</span><strong>{analysis.confidence}%</strong></div>
-            <p className="ai-summary">{analysis.summary}</p>
+            {analysis ? (
+              <>
+                <div className="ai-row"><span className="muted">Detected category</span><strong>{analysis.category}</strong></div>
+                <div className="ai-row"><span className="muted">Estimated volume</span><strong>{analysis.volume || '—'}</strong></div>
+                <div className="ai-row"><span className="muted">Severity score</span><strong>{analysis.severity_score ? `${analysis.severity_score}/100` : '—'}</strong></div>
+                <div className="ai-row"><span className="muted">Priority</span><span className="badge" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>{analysis.priority}</span></div>
+                {analysis.team_size && <div className="ai-row"><span className="muted">Recommended team</span><strong>{analysis.team_size} worker{analysis.team_size > 1 ? 's' : ''}</strong></div>}
+                <div className="ai-row"><span className="muted">Hazard flagged</span><strong>{analysis.hazard_flag ? 'Yes' : 'No'}</strong></div>
+                {analysis.reasoning && (
+                  <div className="ai-row" style={{ flexDirection: 'column', alignItems: 'flex-start', borderBottom: 'none', paddingBottom: 0 }}>
+                    <span className="muted" style={{ marginBottom: 4 }}>AI Reasoning</span>
+                    <strong style={{ fontSize: 13, lineHeight: 1.4 }}>{analysis.reasoning}</strong>
+                  </div>
+                )}
+                {analysis.summary && <p className="ai-summary" style={{ marginTop: 12 }}>{analysis.summary}</p>}
+              </>
+            ) : null}
           </div>
         </div>
       </div>
@@ -306,6 +358,7 @@ function ReviewStep({ photoUrl, analysis, category, setCategory, description, se
           <div className="form-group">
             <label>Adjust category if needed</label>
             <select value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="">Let AI decide</option>
               {REPORT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
@@ -317,7 +370,18 @@ function ReviewStep({ photoUrl, analysis, category, setCategory, description, se
             <label>Your phone (for updates, optional)</label>
             <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Mobile number" />
           </div>
-          {analysis.autoApproved && (
+          {gps ? (
+            <div className="gps-status" style={{ marginBottom: 8 }}>
+              <Icon name="MapPin" size={14} color="#16a34a" />
+              <span>GPS confirmed: {gps.lat.toFixed(4)}, {gps.lng.toFixed(4)}</span>
+            </div>
+          ) : (
+            <div className="gps-status" style={{ marginBottom: 8 }}>
+              <Icon name="MapPinOff" size={14} color="#f59e0b" />
+              <span>No GPS — report will not have a map pin.</span>
+            </div>
+          )}
+          {analysis?.autoApproved && (
             <div className="auto-approve-banner">
               <Icon name="Zap" size={16} /> High-severity hazard — this report will be auto-approved for faster response.
             </div>
@@ -332,19 +396,25 @@ function ReviewStep({ photoUrl, analysis, category, setCategory, description, se
   )
 }
 
-function DoneStep({ ref: refCode, analysis, onNew, onTrack }) {
+function DoneStep({ referenceCode, analysis, onNew, onTrack }) {
   return (
     <div className="done-card">
       <div className="done-icon"><Icon name="CheckCircle2" size={48} color="#16a34a" /></div>
       <h2>Report submitted!</h2>
       <p className="muted">Your reference code</p>
-      <div className="done-ref">{refCode}</div>
+      <div className="done-ref">{referenceCode}</div>
       <p className="muted">Save this to track your report status. The operations team has been notified.</p>
       {analysis && (
-        <div className="done-summary">
-          <div className="ai-row"><span className="muted">Category</span><strong>{analysis.category}</strong></div>
-          <div className="ai-row"><span className="muted">Priority</span><strong>{analysis.priority}</strong></div>
-          <div className="ai-row"><span className="muted">Status</span><strong>{analysis.autoApproved ? 'Auto-approved' : 'Pending review'}</strong></div>
+        <div className="done-summary" style={{ textAlign: 'left', marginTop: 20, padding: 20 }}>
+          <h4 style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="Sparkles" size={16} color="var(--accent)" /> AI Analysis Results</h4>
+          
+          <ul style={{ paddingLeft: 20, fontSize: 14, lineHeight: 1.6, color: 'var(--text)' }}>
+            <li><strong>Decision:</strong> Valid waste report ({analysis.category})</li>
+            {analysis.reasoning && <li><strong>Reasoning:</strong> {analysis.reasoning}</li>}
+            {analysis.summary && <li><strong>Summary for Crew:</strong> {analysis.summary}</li>}
+            <li><strong>Priority Assigned:</strong> {analysis.priority}</li>
+            <li><strong>Status:</strong> {analysis.autoApproved ? 'Auto-approved for immediate cleanup' : 'Pending operator review'}</li>
+          </ul>
         </div>
       )}
       <div className="row-gap" style={{ justifyContent: 'center', marginTop: 20 }}>

@@ -56,6 +56,10 @@ export async function runApprovalAgent(reportId, taskId = null) {
       `UPDATE swachhlens_tasks SET status = $1, updated_at = now() WHERE id = $2`,
       [taskStatus, taskId]
     )
+
+    if (autoApprove) {
+      chainToNotificationAgent(reportId, taskId)
+    }
   }
 
   return { reportId, approvalStatus, autoApprove }
@@ -76,11 +80,16 @@ export async function manualApprove(reportId, operatorId) {
   )
 
   // Activate any pending tasks for this report
-  await pool.query(
+  const { rows: updatedTasks } = await pool.query(
     `UPDATE swachhlens_tasks SET status = 'Assigned', updated_at = now()
-     WHERE report_id = $1 AND status = 'Pending Approval'`,
+     WHERE report_id = $1 AND status = 'Pending Approval'
+     RETURNING id`,
     [reportId]
   )
+
+  if (updatedTasks.length > 0) {
+    chainToNotificationAgent(reportId, updatedTasks[0].id)
+  }
 
   console.log(`[ApprovalAgent] Report ${reportId} manually APPROVED by operator ${operatorId}.`)
   return { success: true, approvalStatus: 'Approved' }
@@ -108,4 +117,16 @@ export async function manualReject(reportId, operatorId, reason = '') {
 
   console.log(`[ApprovalAgent] Report ${reportId} manually REJECTED by operator ${operatorId}. Reason: ${reason || 'none'}`)
   return { success: true, approvalStatus: 'Rejected' }
+}
+
+// ─── Chain to Notification Agent (Phase 7) ─────────────────────────────────
+function chainToNotificationAgent(reportId, taskId) {
+  setImmediate(async () => {
+    try {
+      const { runNotificationAgent } = await import('./notificationAgent.js')
+      await runNotificationAgent(reportId, taskId)
+    } catch (err) {
+      console.error('[ApprovalAgent] Failed to chain to Notification Agent:', err)
+    }
+  })
 }

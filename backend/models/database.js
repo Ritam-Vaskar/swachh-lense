@@ -3,7 +3,10 @@ import { Pool } from 'pg'
 import { DEMO_ACCOUNTS, SCHEMA_SQL, SAMPLE_TASKS, SEED_REPORTS, makeId } from './schema.js'
 import { analyzeReport } from '../lib/ai.js'
 
-const connectionString = process.env.DATABASE_URL || 'postgres://swachhlens:swachhlens@localhost:5432/swachhlens'
+const dbHost = process.env.DB_HOST || 'localhost'
+const dbPort = process.env.DB_PORT || (process.env.DB_HOST ? '5432' : '5433')
+const defaultUrl = `postgres://swachhlens:swachhlens@${dbHost}:${dbPort}/swachhlens`
+const connectionString = process.env.DB_HOST ? defaultUrl : (process.env.DATABASE_URL || defaultUrl)
 const pool = new Pool({ connectionString })
 
 function hashPassword(password) {

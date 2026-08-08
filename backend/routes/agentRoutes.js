@@ -169,4 +169,56 @@ router.get('/pipeline/:reportId', async (req, res) => {
   }
 })
 
+// ---------------------------------------------------------------------------
+// POST /api/agents/verify
+// Worker submits an after image; Gemini Vision compares before vs after.
+// Body: { taskId, afterImageDataUrl, workerNote? }
+//
+// HTTP 200: verification ran successfully (check `passed` in body for result)
+// HTTP 400: missing/invalid inputs
+// HTTP 500: technical failure (Gemini down, DB error, key missing, etc.)
+// ---------------------------------------------------------------------------
+router.post('/verify', async (req, res) => {
+  const { taskId, afterImageDataUrl, workerNote = '' } = req.body || {}
+
+  // Input validation
+  if (!taskId || typeof taskId !== 'string' || !taskId.trim()) {
+    return res.status(400).json({ error: 'taskId is required.' })
+  }
+  if (!afterImageDataUrl || typeof afterImageDataUrl !== 'string') {
+    return res.status(400).json({ error: 'afterImageDataUrl is required.' })
+  }
+  if (!afterImageDataUrl.startsWith('data:image/')) {
+    return res.status(400).json({ error: 'afterImageDataUrl must be a valid image data URL (data:image/...).' })
+  }
+
+  try {
+    const { runVerificationAgent } = await import('../agents/verificationAgent.js')
+    const result = await runVerificationAgent({
+      taskId: taskId.trim(),
+      afterImageDataUrl,
+      workerNote: String(workerNote || ''),
+    })
+
+    // HTTP 200 for both pass and fail — client checks `result.passed`
+    return res.status(200).json(result)
+  } catch (err) {
+    // Technical failure: missing key, Gemini API error, DB error, task not found, etc.
+    console.error('[Route /agents/verify]', err.message)
+
+    // Determine appropriate status code
+    const message = err.message || 'Verification agent encountered an unexpected error.'
+    if (message.includes('not found') || message.includes('not configured')) {
+      return res.status(422).json({ error: message })
+    }
+    if (message.includes('GEMINI_API_KEY')) {
+      return res.status(503).json({ error: 'AI verification is temporarily unavailable. Please try again in a moment.' })
+    }
+    if (message.includes('Gemini API returned HTTP')) {
+      return res.status(502).json({ error: 'AI verification is temporarily unavailable. Please try again in a moment.' })
+    }
+    return res.status(500).json({ error: message })
+  }
+})
+
 export default router

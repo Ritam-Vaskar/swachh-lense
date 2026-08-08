@@ -12,10 +12,12 @@
  * 4. Trigger Correlation Agent and Priority Agent next
  */
 
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import { getPool } from '../models/database.js'
 import sharp from 'sharp'
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
+const GEMINI_MODEL = 'gemini-2.0-flash'
 
 // ---------------------------------------------------------------------------
 // Fallback keyword heuristic (used when GEMINI_API_KEY is absent)
@@ -131,37 +133,18 @@ Return ONLY the JSON object. No markdown, no code fences.`
   const [header, base64Data] = processedDataUrl.split(',')
   const mimeType = 'image/jpeg'
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: prompt },
-            { inline_data: { mime_type: mimeType, data: base64Data } },
-          ],
-        }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 4096, responseMimeType: "application/json" },
-      }),
-    },
-  )
+  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
+  const model = genAI.getGenerativeModel({
+    model: GEMINI_MODEL,
+    generationConfig: { temperature: 0.1, maxOutputTokens: 4096, responseMimeType: "application/json" },
+  })
 
-  if (!response.ok) {
-    const errText = await response.text()
-    throw new Error(`Gemini API error ${response.status}: ${errText}`)
-  }
-
-  const result = await response.json()
-  
-  if (result.candidates?.[0]?.finishReason === 'SAFETY') {
-    throw new Error('Gemini blocked the response due to safety guidelines.')
-  }
-  
-  const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text || ''
+  const imagePart = { inlineData: { mimeType, data: base64Data } }
+  const result = await model.generateContent([prompt, imagePart])
+  const response = result.response
+  const rawText = response.text()
   if (!rawText) {
-    throw new Error('Gemini returned an empty response. Raw result: ' + JSON.stringify(result))
+    throw new Error('Gemini returned an empty response.')
   }
 
   // Sanitize and parse JSON from the model response

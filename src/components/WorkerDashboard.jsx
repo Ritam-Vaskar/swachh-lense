@@ -1,12 +1,27 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api/index.js'
 import { useAuth } from '../lib/auth'
-import { rateCompletion } from '../lib/ai'
-import { uploadEvidence } from '../lib/storage'
 import { Icon, Toast } from './ui'
 import MapView from './MapView'
 import { statusColors, priorityColors, formatRelativeTime, formatDate, getSlaStatus } from '../lib/constants'
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
+
+// ---------------------------------------------------------------------------
+// Utility: read a File as a base64 data URL
+// ---------------------------------------------------------------------------
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('Could not read file'))
+    reader.readAsDataURL(file)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// WorkerDashboard root
+// ---------------------------------------------------------------------------
 export default function WorkerDashboard({ onSignOut }) {
   const { profile, signOut } = useAuth()
   const [tasks, setTasks] = useState([])
@@ -17,7 +32,7 @@ export default function WorkerDashboard({ onSignOut }) {
 
   function showToast(message, type = 'info') {
     setToast({ message, type })
-    setTimeout(() => setToast(null), 3000)
+    setTimeout(() => setToast(null), 4000)
   }
 
   const loadTasks = useCallback(async () => {
@@ -34,7 +49,6 @@ export default function WorkerDashboard({ onSignOut }) {
 
   useEffect(() => {
     loadTasks()
-    // Realtime subscription for new task assignments
     const sub = api
       .channel('worker-tasks')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'swachhlens_tasks', filter: `worker_id=eq.${profile?.id}` }, () => loadTasks())
@@ -42,7 +56,7 @@ export default function WorkerDashboard({ onSignOut }) {
     return () => api.removeChannel(sub)
   }, [loadTasks, profile])
 
-  // Update worker's live GPS
+  // Live GPS tracking
   useEffect(() => {
     if (!profile) return
     if (navigator.geolocation) {
@@ -68,47 +82,28 @@ export default function WorkerDashboard({ onSignOut }) {
       .eq('id', task.id)
     if (error) { showToast('Could not update status.', 'error'); return }
     setTasks((t) => t.map((x) => (x.id === task.id ? { ...x, status } : x)))
-    setSelected({ ...selected, ...task, status })
+    setSelected((s) => s ? { ...s, status } : s)
     showToast(`Task marked ${status}.`, 'success')
   }
 
-  async function submitCompletion(task, { afterPhoto, afterNote }) {
-    let afterUrl = null
-    if (afterPhoto) {
-      const { url } = await uploadEvidence(afterPhoto, 'worker-after')
-      afterUrl = url
-    }
-    const rating = rateCompletion({
-      beforeDescription: task.report?.description,
-      afterDescription: afterNote,
-      beforeUrl: task.report?.image_url,
-      afterUrl,
-    })
-    const { error } = await api
-      .from('swachhlens_tasks')
-      .update({
-        status: 'Completed',
-        after_image_url: afterUrl,
-        worker_note: afterNote,
-        ai_rating: rating,
-        completion_score: rating,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', task.id)
-    if (error) { showToast('Could not submit completion.', 'error'); return }
-
-    // Update the linked report to Resolved
-    await api
-      .from('swachhlens_reports')
-      .update({ status: 'Resolved', citizen_update: 'Site cleaned. Awaiting verification.', updated_at: new Date().toISOString() })
-      .eq('id', task.report_id)
-
-    setTasks((t) => t.map((x) => (x.id === task.id ? { ...x, status: 'Completed', after_image_url: afterUrl, ai_rating: rating, worker_note: afterNote } : x)))
+  // Called after a successful verification is fully committed by the server
+  function onVerificationComplete(taskId, verificationResult) {
+    setTasks((t) => t.map((x) =>
+      x.id === taskId
+        ? {
+            ...x,
+            status: 'Completed',
+            ai_rating: verificationResult.overall_score,
+            completion_score: verificationResult.overall_score,
+            ai_feedback: verificationResult.ai_feedback,
+          }
+        : x,
+    ))
     setSelected(null)
-    showToast(`Cleanup submitted. AI rating: ${rating}/100`, 'success')
+    showToast(`Cleanup verified ✓  AI score: ${verificationResult.overall_score}/100`, 'success')
   }
 
-  const active = tasks.filter((t) => t.status !== 'Completed' && t.status !== 'Verified' && t.status !== 'Cancelled')
+  const active    = tasks.filter((t) => t.status !== 'Completed' && t.status !== 'Verified' && t.status !== 'Cancelled')
   const completed = tasks.filter((t) => t.status === 'Completed' || t.status === 'Verified')
 
   return (
@@ -197,7 +192,7 @@ export default function WorkerDashboard({ onSignOut }) {
           task={selected}
           onClose={() => setSelected(null)}
           onStatus={(s) => updateTaskStatus(selected, s)}
-          onSubmit={submitCompletion}
+          onVerificationComplete={onVerificationComplete}
           toast={showToast}
         />
       )}
@@ -207,6 +202,9 @@ export default function WorkerDashboard({ onSignOut }) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// TaskCard
+// ---------------------------------------------------------------------------
 function TaskCard({ task, onClick, onStatus, completed }) {
   const report = task.report
   const sla = report ? getSlaStatus(report) : null
@@ -244,26 +242,77 @@ function TaskCard({ task, onClick, onStatus, completed }) {
   )
 }
 
-function TaskDrawer({ task, onClose, onStatus, onSubmit, toast }) {
-  const [afterPhoto, setAfterPhoto] = useState(null)
-  const [afterUrl, setAfterUrl] = useState(null)
+// ---------------------------------------------------------------------------
+// TaskDrawer — side drawer with verification flow
+// ---------------------------------------------------------------------------
+function TaskDrawer({ task, onClose, onStatus, onVerificationComplete, toast }) {
+  const [afterFile, setAfterFile] = useState(null)
+  const [afterPreviewUrl, setAfterPreviewUrl] = useState(null)   // blob URL for local preview
+  const [afterDataUrl, setAfterDataUrl]     = useState(null)     // base64 data URL for API
   const [afterNote, setAfterNote] = useState('')
-  const [submitting, setSubmitting] = useState(false)
+  const [verifying, setVerifying] = useState(false)
+  const [verificationResult, setVerificationResult] = useState(null)
+  const [showModal, setShowModal] = useState(false)
   const report = task.report
 
   function handlePhoto(file) {
-    setAfterPhoto(file)
-    setAfterUrl(URL.createObjectURL(file))
+    setAfterFile(file)
+    setAfterPreviewUrl(URL.createObjectURL(file))
+    setVerificationResult(null) // reset previous result when new photo selected
+    // Convert to data URL immediately (needed later for API)
+    fileToDataUrl(file).then(setAfterDataUrl).catch(() => toast('Could not read image file.', 'error'))
   }
 
-  async function submit() {
-    if (!afterPhoto && !afterNote) {
-      toast('Add an after photo or note to submit.', 'error')
+  async function handleVerify() {
+    if (!afterDataUrl) {
+      toast('Please take or select an after photo first.', 'error')
       return
     }
-    setSubmitting(true)
-    await onSubmit(task, { afterPhoto, afterNote })
-    setSubmitting(false)
+
+    setVerifying(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/agents/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskId: task.id,
+          afterImageDataUrl: afterDataUrl,
+          workerNote: afterNote,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        // Technical/server failure
+        const msg = data?.error || 'AI verification is temporarily unavailable. Please try again in a moment.'
+        toast(msg, 'error')
+        return
+      }
+
+      // HTTP 200 — could be passed or failed
+      setVerificationResult(data)
+      setShowModal(true)
+    } catch (err) {
+      toast('AI verification is temporarily unavailable. Please try again in a moment.', 'error')
+    } finally {
+      setVerifying(false)
+    }
+  }
+
+  function handleTryAgain() {
+    setShowModal(false)
+    setVerificationResult(null)
+    setAfterFile(null)
+    setAfterPreviewUrl(null)
+    setAfterDataUrl(null)
+    setAfterNote('')
+  }
+
+  function handleSubmitToMunicipal() {
+    // Server already committed the DB update when verification passed.
+    // This button just finalises the UI flow.
+    onVerificationComplete(task.id, verificationResult)
   }
 
   return (
@@ -285,6 +334,7 @@ function TaskDrawer({ task, onClose, onStatus, onSubmit, toast }) {
         </div>
 
         <div className="drawer-body">
+          {/* Task details */}
           <div className="detail-section">
             <div className="detail-label">Task details</div>
             <div className="detail-grid">
@@ -298,6 +348,7 @@ function TaskDrawer({ task, onClose, onStatus, onSubmit, toast }) {
             {report?.description && <p style={{ fontSize: 14, marginTop: 12, lineHeight: 1.6 }}>{report.description}</p>}
           </div>
 
+          {/* Before photo */}
           {report?.image_url && (
             <div className="detail-section">
               <div className="detail-label">Before photo (from citizen)</div>
@@ -305,6 +356,7 @@ function TaskDrawer({ task, onClose, onStatus, onSubmit, toast }) {
             </div>
           )}
 
+          {/* Site map */}
           {report?.latitude && (
             <div className="detail-section">
               <div className="detail-label">Site location</div>
@@ -312,41 +364,61 @@ function TaskDrawer({ task, onClose, onStatus, onSubmit, toast }) {
             </div>
           )}
 
+          {/* Cleanup submission form — only shown when task is active */}
           {task.status !== 'Completed' && task.status !== 'Verified' && (
             <div className="detail-section">
               <div className="detail-label">Submit cleanup evidence</div>
               <div className="form-group">
-                <label>After photo</label>
-                {afterUrl ? (
-                  <div className="image-placeholder"><img src={afterUrl} alt="After" /></div>
+                <label>After photo <span style={{ color: 'var(--danger)', fontWeight: 600 }}>*</span></label>
+                {afterPreviewUrl ? (
+                  <div style={{ position: 'relative' }}>
+                    <div className="image-placeholder"><img src={afterPreviewUrl} alt="After" /></div>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ marginTop: 6 }}
+                      onClick={() => { setAfterFile(null); setAfterPreviewUrl(null); setAfterDataUrl(null); setVerificationResult(null) }}
+                    >
+                      <Icon name="RefreshCw" size={13} /> Change photo
+                    </button>
+                  </div>
                 ) : (
-                  <label className="capture-zone small">
-                    <input type="file" accept="image/*" capture="environment" onChange={(e) => e.target.files[0] && handlePhoto(e.target.files[0])} hidden />
+                  <label className="capture-zone small" htmlFor="after-photo-input">
+                    <input
+                      id="after-photo-input"
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(e) => e.target.files[0] && handlePhoto(e.target.files[0])}
+                      hidden
+                    />
                     <Icon name="Camera" size={28} />
                     <span>Take after photo</span>
                   </label>
                 )}
               </div>
               <div className="form-group">
-                <label>Completion note</label>
+                <label>Completion note (optional)</label>
                 <textarea value={afterNote} onChange={(e) => setAfterNote(e.target.value)} placeholder="e.g. Bin cleared, area washed and disinfected" />
               </div>
-              <p className="muted" style={{ fontSize: 12 }}>
-                <Icon name="Sparkles" size={12} /> AI will compare before &amp; after photos to generate a quality rating.
+              <p className="muted" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Icon name="Sparkles" size={12} />
+                Gemini Vision AI will compare both photos to verify the cleanup. The task is only marked complete after AI verification passes.
               </p>
             </div>
           )}
 
+          {/* Completed task — show AI rating */}
           {task.ai_rating != null && (
             <div className="detail-section">
-              <div className="detail-label">AI completion rating</div>
+              <div className="detail-label">AI verification rating</div>
               <div className="rating-display">
                 <div className="rating-score" style={{ color: task.ai_rating >= 80 ? '#16a34a' : task.ai_rating >= 60 ? '#f59e0b' : '#ef4444' }}>
                   {task.ai_rating}<span>/100</span>
                 </div>
                 <div className="rating-bar"><div className="rating-fill" style={{ width: `${task.ai_rating}%`, background: task.ai_rating >= 80 ? '#16a34a' : task.ai_rating >= 60 ? '#f59e0b' : '#ef4444' }} /></div>
               </div>
-              {task.worker_note && <p style={{ fontSize: 13, marginTop: 8 }} className="muted">{task.worker_note}</p>}
+              {task.ai_feedback && <p style={{ fontSize: 13, marginTop: 8, lineHeight: 1.6 }} className="muted">{task.ai_feedback}</p>}
+              {task.worker_note && <p style={{ fontSize: 13, marginTop: 6 }} className="muted">{task.worker_note}</p>}
             </div>
           )}
         </div>
@@ -356,12 +428,209 @@ function TaskDrawer({ task, onClose, onStatus, onSubmit, toast }) {
           {task.status === 'Assigned' && <button className="btn btn-primary" onClick={() => onStatus('En route')}><Icon name="Navigation" size={16} /> En route</button>}
           {task.status === 'En route' && <button className="btn btn-primary" onClick={() => onStatus('On site')}><Icon name="MapPin" size={16} /> On site</button>}
           {task.status === 'On site' && (
-            <button className="btn btn-success" onClick={submit} disabled={submitting}>
-              <Icon name="Check" size={16} /> {submitting ? 'Submitting…' : 'Submit cleanup'}
+            <button
+              className="btn btn-success"
+              onClick={handleVerify}
+              disabled={verifying || !afterDataUrl}
+              id="verify-cleanup-btn"
+            >
+              {verifying
+                ? <><Icon name="Loader2" size={16} style={{ animation: 'spin 1s linear infinite' }} /> Verifying with AI…</>
+                : <><Icon name="Sparkles" size={16} /> Verify with AI</>
+              }
             </button>
           )}
         </div>
       </div>
+
+      {/* Verification result modal */}
+      {showModal && verificationResult && (
+        <VerificationModal
+          result={verificationResult}
+          beforeImageUrl={report?.image_url}
+          afterImageUrl={afterPreviewUrl}
+          onTryAgain={handleTryAgain}
+          onSubmit={handleSubmitToMunicipal}
+        />
+      )}
     </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// VerificationModal
+// ---------------------------------------------------------------------------
+function VerificationModal({ result, beforeImageUrl, afterImageUrl, onTryAgain, onSubmit }) {
+  const { passed } = result
+  const scoreColor = result.overall_score >= 80 ? '#16a34a' : result.overall_score >= 60 ? '#f59e0b' : '#ef4444'
+
+  return (
+    <div className="verify-modal-overlay" role="dialog" aria-modal="true" aria-label="AI Verification Result">
+      <div className="verify-modal">
+        {/* Header */}
+        <div className={`verify-modal-header ${passed ? 'verify-modal-header--pass' : 'verify-modal-header--fail'}`}>
+          <div className="verify-modal-header-icon">
+            {passed
+              ? <Icon name="ShieldCheck" size={28} />
+              : <Icon name="ShieldX" size={28} />
+            }
+          </div>
+          <div>
+            <h2 className="verify-modal-title">
+              {passed ? 'Cleanup Verified ✓' : 'Verification Failed'}
+            </h2>
+            <p className="verify-modal-subtitle">
+              {passed
+                ? 'Gemini AI has confirmed the cleanup is complete.'
+                : 'Gemini AI could not confirm the cleanup. See details below.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="verify-modal-body">
+          {/* Banner */}
+          {passed
+            ? (
+              <div className="verify-pass-banner">
+                <Icon name="CheckCircle2" size={18} />
+                Cleanup verified successfully by AI.
+              </div>
+            )
+            : (
+              <div className="verify-fail-banner">
+                <Icon name="XCircle" size={18} />
+                Your work is not verified. Please upload a clearer photo showing the completed cleanup.
+              </div>
+            )
+          }
+
+          {/* Rejection reasons */}
+          {!passed && result.rejection_reasons?.length > 0 && (
+            <div className="verify-rejection-list">
+              <div className="verify-section-label">Rejection reasons</div>
+              <ul>
+                {result.rejection_reasons.map((reason, i) => (
+                  <li key={i}><Icon name="AlertCircle" size={14} /> {reason}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Before / After images */}
+          <div className="verify-image-pair">
+            <div className="verify-image-box">
+              <div className="verify-image-label">BEFORE</div>
+              {beforeImageUrl
+                ? <img src={beforeImageUrl} alt="Before" className="verify-img" />
+                : <div className="verify-img-placeholder"><Icon name="ImageOff" size={32} /><span>No before image</span></div>
+              }
+            </div>
+            <div className="verify-image-box">
+              <div className="verify-image-label">AFTER</div>
+              {afterImageUrl
+                ? <img src={afterImageUrl} alt="After" className="verify-img" />
+                : <div className="verify-img-placeholder"><Icon name="ImageOff" size={32} /><span>No after image</span></div>
+              }
+            </div>
+          </div>
+
+          {/* Verification checklist */}
+          <div className="verify-checklist">
+            <div className="verify-section-label">Verification checklist</div>
+            <div className="verify-check-item">
+              <span className={`verify-check-icon ${result.is_same_location ? 'pass' : 'fail'}`}>
+                {result.is_same_location ? '✅' : '❌'}
+              </span>
+              <div>
+                <strong>Same Location Match</strong>
+                <span className="verify-check-sub">Confidence: {result.location_match_confidence}%</span>
+              </div>
+            </div>
+            <div className="verify-check-item">
+              <span className={`verify-check-icon ${result.is_cleaned ? 'pass' : 'fail'}`}>
+                {result.is_cleaned ? '✅' : '❌'}
+              </span>
+              <div>
+                <strong>Waste Properly Removed</strong>
+                <span className="verify-check-sub">Cleaning score: {result.cleaning_score}/100</span>
+              </div>
+            </div>
+            <div className="verify-check-item">
+              <span className={`verify-check-icon ${result.is_relevant ? 'pass' : 'fail'}`}>
+                {result.is_relevant ? '✅' : '❌'}
+              </span>
+              <div>
+                <strong>Photo is Relevant</strong>
+                <span className="verify-check-sub">After photo shows the cleanup site</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Score bar */}
+          <div className="verify-score-section">
+            <div className="verify-section-label">Completion Score</div>
+            <div className="verify-score-display">
+              <span className="verify-score-value" style={{ color: scoreColor }}>{result.overall_score}</span>
+              <span className="verify-score-denom">/100</span>
+            </div>
+            <div className="verify-score-bar">
+              <div
+                className="verify-score-fill"
+                style={{ width: `${result.overall_score}%`, background: scoreColor }}
+              />
+            </div>
+            <div className="verify-score-labels">
+              <span>0</span>
+              <span style={{ color: '#ef4444' }}>Fail (&lt;60)</span>
+              <span style={{ color: '#f59e0b' }}>Pass (60–79)</span>
+              <span style={{ color: '#16a34a' }}>Good (80+)</span>
+              <span>100</span>
+            </div>
+          </div>
+
+          {/* AI Feedback */}
+          <div className="verify-feedback">
+            <div className="verify-section-label">AI Feedback</div>
+            <p>{result.ai_feedback}</p>
+          </div>
+
+          {/* Scene descriptions */}
+          <div className="verify-scenes">
+            <div className="verify-scene-box">
+              <div className="verify-section-label">Before scene</div>
+              <p>{result.before_scene_description}</p>
+            </div>
+            <div className="verify-scene-box">
+              <div className="verify-section-label">After scene</div>
+              <p>{result.after_scene_description}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer actions */}
+        <div className="verify-modal-footer">
+          {passed ? (
+            <>
+              <button className="btn btn-ghost" onClick={onTryAgain}>Close</button>
+              <button
+                className="btn btn-success verify-submit-btn"
+                onClick={onSubmit}
+                id="submit-to-municipal-btn"
+              >
+                <Icon name="CheckCircle2" size={18} />
+                Submit to Municipal Dashboard ✓
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-primary verify-retry-btn" onClick={onTryAgain} id="verify-try-again-btn">
+                <Icon name="RefreshCw" size={16} />
+                Try Again
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }

@@ -115,4 +115,7 @@ CREATE INDEX IF NOT EXISTS swachhlens_reports_approval_idx ON swachhlens_reports
 CREATE INDEX IF NOT EXISTS swachhlens_tasks_report_id_idx ON swachhlens_tasks(report_id);
 CREATE INDEX IF NOT EXISTS swachhlens_tasks_status_idx ON swachhlens_tasks(status);
 CREATE INDEX IF NOT EXISTS swachhlens_tasks_worker_idx ON swachhlens_tasks(worker_id);
+
+-- Additive migrations (idempotent)
+ALTER TABLE swachhlens_tasks ADD COLUMN IF NOT EXISTS ai_feedback text;
 `

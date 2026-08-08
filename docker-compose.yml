@@ -12,5 +12,27 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  app:
+    build: .
+    container_name: swachhlens-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      PORT: 3001
+      DB_HOST: postgres
+      DB_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-swachhlens}
+      POSTGRES_USER: ${POSTGRES_USER:-swachhlens}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-swachhlens}
+    depends_on:
+      - postgres
+    ports:
+      - '3001:3001'
+      - '5173:5173'
+
 volumes:
   postgres_data:

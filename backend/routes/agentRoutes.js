@@ -169,4 +169,25 @@ router.get('/pipeline/:reportId', async (req, res) => {
   }
 })
 
+// ---------------------------------------------------------------------------
+// POST /api/agents/verify
+// Worker submits after photo for AI verification.
+// Body: { taskId, afterImageDataUrl, workerNote? }
+// Returns: { passed, overall_score, rejection_reasons, ai_feedback, ... }
+// ---------------------------------------------------------------------------
+router.post('/verify', async (req, res) => {
+  const { taskId, afterImageDataUrl, workerNote = '' } = req.body || {}
+  if (!taskId || !afterImageDataUrl) {
+    return res.status(400).json({ error: 'taskId and afterImageDataUrl are required.' })
+  }
+  try {
+    const { runVerificationAgent } = await import('../agents/verificationAgent.js')
+    const result = await runVerificationAgent({ taskId, afterImageDataUrl, workerNote })
+    res.json({ success: true, ...result })
+  } catch (err) {
+    console.error('[Route /agents/verify]', err)
+    res.status(500).json({ error: err.message || 'Verification agent failed.' })
+  }
+})
+
 export default router

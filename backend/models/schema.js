@@ -4,6 +4,7 @@ export const DEMO_ACCOUNTS = [
   { email: 'operator@swachhlens.local', password: 'Swachh123!', role: 'operator', full_name: 'Demo Operator', phone: '', zone: 'Central' },
   { email: 'green@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Green Squad A', phone: '+91 90000 10001', zone: 'Central', latitude: 12.9783, longitude: 77.5921 },
   { email: 'river@crew.local', password: 'Swachh123!', role: 'worker', full_name: 'River Crew B', phone: '+91 90000 10002', zone: 'Riverside', latitude: 12.9442, longitude: 77.5808 },
+  { email: 'bbsr@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Bhubaneswar Squad', phone: '+91 90000 10003', zone: 'Central', latitude: 20.3568, longitude: 85.8198 },
 ]
 
 export const SEED_REPORTS = [
@@ -93,6 +94,7 @@ CREATE TABLE IF NOT EXISTS swachhlens_tasks (
   longitude double precision,
   worker_id uuid REFERENCES profiles(id) ON DELETE SET NULL,
   ai_rating integer,
+  ai_feedback text NOT NULL DEFAULT '',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );

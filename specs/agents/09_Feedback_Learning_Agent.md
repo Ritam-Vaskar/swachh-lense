@@ -13,7 +13,7 @@ This agent gathers post-completion data to create a self-improving system. It co
 ## Responsibilities
 1. **Data Aggregation:** Pair the before/after images with the vision AI's initial predictions to create ground-truth training pairs.
 2. **Performance Tracking:** Update worker ratings (speed, reliability).
-3. **Civic Gamification:** Update citizen profiles with points or badges for successful, verified reports.
+
 
 ## Outputs
 - Updates to worker profiles and citizen profiles.

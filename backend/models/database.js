@@ -79,6 +79,17 @@ function buildWhere(filters = []) {
 
 async function ensureSchema() {
   await pool.query(SCHEMA_SQL)
+  // Run migrations for columns added after initial schema creation
+  const migrations = [
+    `ALTER TABLE swachhlens_tasks ADD COLUMN IF NOT EXISTS ai_feedback text NOT NULL DEFAULT ''`,
+  ]
+  for (const sql of migrations) {
+    await pool.query(sql).catch((err) => {
+      if (!err.message.includes('already exists')) {
+        console.warn('[DB Migration]', err.message)
+      }
+    })
+  }
 }
 
 async function selectRows({ table, columns = '*', filters = [], order, head = false }) {

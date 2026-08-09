@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS swachhlens_tasks (
   longitude double precision,
   worker_id uuid REFERENCES profiles(id) ON DELETE SET NULL,
   ai_rating integer,
+  ai_feedback text NOT NULL DEFAULT '',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );

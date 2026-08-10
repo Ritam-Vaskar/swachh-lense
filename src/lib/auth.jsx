@@ -51,16 +51,30 @@ export function AuthProvider({ children }) {
   }
 
   async function signUp({ email, password, role, full_name, phone, zone }) {
-    const { data, error } = await api.auth.signUp({ email, password })
+    const { data, error } = await api.auth.signUp({ email, password, role, full_name, phone, zone })
     if (error) return { error }
-    if (data.user) await ensureProfile(data.user, role, { full_name, phone, zone })
+    if (data?.user) {
+      if (data.profile) {
+        setSession(data.session || { user: data.user })
+        setProfile(data.profile)
+      } else {
+        await ensureProfile(data.user, role, { full_name, phone, zone })
+      }
+    }
     return { error: null }
   }
 
   async function signIn({ email, password }) {
     const { data, error } = await api.auth.signInWithPassword({ email, password })
     if (error) return { error }
-    if (data.user) await loadProfile(data.user.id)
+    if (data?.user) {
+      setSession(data.session)
+      if (data.profile) {
+        setProfile(data.profile)
+      } else {
+        await loadProfile(data.user.id)
+      }
+    }
     return { error: null }
   }
 

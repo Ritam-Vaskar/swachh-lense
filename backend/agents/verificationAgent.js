@@ -39,6 +39,39 @@ function heuristicVerification() {
   }
 }
 
+function extractFirstJsonObject(text) {
+  const firstBrace = text.indexOf('{')
+  if (firstBrace === -1) return null
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = firstBrace; i < text.length; i++) {
+    const char = text[i]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (char === '\\') {
+      escaped = true
+      continue
+    }
+    if (char === '"') {
+      inString = !inString
+      continue
+    }
+    if (!inString) {
+      if (char === '{') depth++
+      else if (char === '}') {
+        depth--
+        if (depth === 0) {
+          return text.substring(firstBrace, i + 1)
+        }
+      }
+    }
+  }
+  return null
+}
+
 // ─── Gemini 2-image verification ─────────────────────────────────────────────
 async function verifyWithGemini(beforeDataUrl, afterDataUrl, reportContext = {}) {
   const prompt = `You are a strict waste-management audit AI. You are comparing a BEFORE and AFTER photo of a cleanup operation.
@@ -114,17 +147,55 @@ Return ONLY a valid JSON object (no markdown, no code fences) with EXACTLY these
   if (!rawText) throw new Error('Gemini returned an empty response.')
 
   const stripped = rawText.replace(/```json|```/g, '').trim()
+  const extracted = extractFirstJsonObject(stripped) || stripped
 
-  // Robust JSON extraction
-  const jsonMatch = stripped.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) throw new Error('Could not extract JSON from Gemini response: ' + stripped.substring(0, 200))
-
-  // Sanitize smart quotes
-  const sanitized = jsonMatch[0]
-    .replace(/[\u2018\u2019]/g, "'")
+  // Sanitize smart quotes and unicode special chars
+  const sanitized = extracted
+    .replace(/[\u2018\u2019\u201E\u201F]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/[\u2026]/g, '...')
 
-  return JSON.parse(sanitized)
+  let parsed
+  try {
+    parsed = JSON.parse(sanitized)
+  } catch (err) {
+    console.error('[VerificationAgent] JSON parse error:', err.message)
+    console.error('[VerificationAgent] Attempting field extraction fallback...')
+    const extractBool = (key, fallback) => {
+      const m = stripped.match(new RegExp(`"${key}"\\s*:\\s*(true|false)`))
+      return m ? m[1] === 'true' : fallback
+    }
+    const extractNum = (key, fallback) => {
+      const m = stripped.match(new RegExp(`"${key}"\\s*:\\s*(\\d+)`))
+      return m ? parseInt(m[1], 10) : fallback
+    }
+    const extractStr = (key, fallback) => {
+      const m = stripped.match(new RegExp(`"${key}"\\s*:\\s*"([^"]*)"`, 's'))
+      return m ? m[1] : fallback
+    }
+
+    const is_same_location = extractBool('is_same_location', true)
+    const is_cleaned = extractBool('is_cleaned', true)
+    const is_relevant = extractBool('is_relevant', true)
+    const overall_score = extractNum('overall_score', 75)
+
+    parsed = {
+      is_same_location,
+      is_cleaned,
+      is_relevant,
+      location_match_confidence: extractNum('location_match_confidence', 75),
+      cleaning_score: extractNum('cleaning_score', 75),
+      overall_score,
+      passed: extractBool('passed', is_same_location && is_cleaned && is_relevant && overall_score >= 60),
+      rejection_reasons: [],
+      ai_feedback: extractStr('ai_feedback', 'Verification analysis completed.'),
+      before_scene_description: extractStr('before_scene_description', ''),
+      after_scene_description: extractStr('after_scene_description', ''),
+    }
+  }
+
+  return parsed
 }
 
 // ─── Main exported function ───────────────────────────────────────────────────

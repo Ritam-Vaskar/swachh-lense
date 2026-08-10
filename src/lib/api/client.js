@@ -167,7 +167,10 @@ function makeAuthApi() {
 				method: 'POST',
 				body: JSON.stringify({ email, password, role, full_name, phone, zone }),
 			})
-			return { data: result, error: null }
+			const session = { user: result.user }
+			writeSession(session)
+			emitAuth('SIGNED_IN', session)
+			return { data: { user: result.user, profile: result.profile, session }, error: null }
 		},
 		async ensureUser({ email, password, role, full_name, phone, zone, latitude, longitude, is_available }) {
 			const result = await request('/api/auth/ensure', {
@@ -184,7 +187,7 @@ function makeAuthApi() {
 			const session = { user: result.user }
 			writeSession(session)
 			emitAuth('SIGNED_IN', session)
-			return { data: { user: result.user, session }, error: null }
+			return { data: { user: result.user, profile: result.profile, session }, error: null }
 		},
 		async signOut() {
 			writeSession(null)

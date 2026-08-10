@@ -30,7 +30,6 @@ export default function AuthScreen({ onCitizen }) {
       }
       const { error } = await signUp({ ...form, role })
       if (error) setError(error.message.includes('already') ? 'An account with this email already exists.' : error.message)
-      else setError('Check your email — but since confirmation is off, try signing in now.')
     }
     setBusy(false)
   }

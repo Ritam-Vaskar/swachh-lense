@@ -4,6 +4,7 @@ import { useAuth } from '../lib/auth'
 import { uploadEvidence } from '../lib/storage'
 import { Icon, Toast } from './ui'
 import MapView from './MapView'
+import WorkerNavigationModal from './WorkerNavigationModal'
 import { statusColors, priorityColors, formatDate, getSlaStatus } from '../lib/constants'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
@@ -138,6 +139,7 @@ export default function WorkerDashboard({ onSignOut }) {
   const [selected, setSelected] = useState(null)
   const [toast, setToast] = useState(null)
   const [view, setView] = useState('list')
+  const [navTask, setNavTask] = useState(null)
 
   function showToast(message, type = 'info') {
     setToast({ message, type })
@@ -185,7 +187,22 @@ export default function WorkerDashboard({ onSignOut }) {
     if (error) { showToast('Could not update status.', 'error'); return }
     setTasks((t) => t.map((x) => (x.id === task.id ? { ...x, status } : x)))
     setSelected((s) => s ? { ...s, status } : s)
+    setNavTask((n) => n && n.id === task.id ? { ...n, status } : n)
     showToast(`Task marked ${status}.`, 'success')
+  }
+
+  async function handleStartNavigation(task) {
+    // Mark En route first, then open live navigation
+    await updateTaskStatus(task, 'En route')
+    setNavTask({ ...task, status: 'En route' })
+    setSelected(null)
+  }
+
+  async function handleArrivedOnSite() {
+    if (!navTask) return
+    await updateTaskStatus(navTask, 'On site')
+    setNavTask(null)
+    showToast('Marked On Site. You can now submit cleanup evidence.', 'success')
   }
 
   function handleTaskCompleted(updatedTask) {
@@ -259,7 +276,7 @@ export default function WorkerDashboard({ onSignOut }) {
             ) : (
               <div className="task-cards">
                 {active.map((t) => (
-                  <TaskCard key={t.id} task={t} onClick={() => setSelected(t)} onStatus={(s) => updateTaskStatus(t, s)} />
+                  <TaskCard key={t.id} task={t} onClick={() => setSelected(t)} onStatus={(s) => updateTaskStatus(t, s)} onNavigate={() => handleStartNavigation(t)} />
                 ))}
               </div>
             )}
@@ -283,8 +300,18 @@ export default function WorkerDashboard({ onSignOut }) {
           task={selected}
           onClose={() => setSelected(null)}
           onStatus={(s) => updateTaskStatus(selected, s)}
+          onStartNavigation={() => handleStartNavigation(selected)}
           onCompleted={handleTaskCompleted}
           toast={showToast}
+        />
+      )}
+
+      {navTask && (
+        <WorkerNavigationModal
+          task={navTask}
+          workerProfile={profile}
+          onClose={() => setNavTask(null)}
+          onArrivedOnSite={handleArrivedOnSite}
         />
       )}
 
@@ -294,7 +321,7 @@ export default function WorkerDashboard({ onSignOut }) {
 }
 
 // ─── TaskCard ─────────────────────────────────────────────────────────────────
-function TaskCard({ task, onClick, onStatus, completed }) {
+function TaskCard({ task, onClick, onStatus, onNavigate, completed }) {
   const report = task.report
   const sla = report ? getSlaStatus(report) : null
   return (
@@ -323,8 +350,21 @@ function TaskCard({ task, onClick, onStatus, completed }) {
         </>
       )}
       {!completed && task.status === 'Assigned' && (
-        <button className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }} onClick={(e) => { e.stopPropagation(); onStatus('En route') }}>
+        <button
+          className="btn btn-primary btn-sm"
+          style={{ marginTop: 10, width: '100%' }}
+          onClick={(e) => { e.stopPropagation(); onNavigate ? onNavigate() : onClick() }}
+        >
           <Icon name="Navigation" size={14} /> Start navigation
+        </button>
+      )}
+      {!completed && task.status === 'En route' && (
+        <button
+          className="btn btn-ghost btn-sm"
+          style={{ marginTop: 10, width: '100%', border: '1px solid var(--primary)', color: 'var(--primary)' }}
+          onClick={(e) => { e.stopPropagation(); onNavigate ? onNavigate() : onClick() }}
+        >
+          <span className="nav-active-badge"><Icon name="Navigation" size={12} /> En route — Open map</span>
         </button>
       )}
     </div>
@@ -332,7 +372,7 @@ function TaskCard({ task, onClick, onStatus, completed }) {
 }
 
 // ─── TaskDrawer ───────────────────────────────────────────────────────────────
-function TaskDrawer({ task, onClose, onStatus, onCompleted, toast }) {
+function TaskDrawer({ task, onClose, onStatus, onStartNavigation, onCompleted, toast }) {
   const [afterPhoto, setAfterPhoto] = useState(null)
   const [afterUrl, setAfterUrl] = useState(null)
   const [afterNote, setAfterNote] = useState('')
@@ -489,8 +529,16 @@ function TaskDrawer({ task, onClose, onStatus, onCompleted, toast }) {
 
         <div className="drawer-footer">
           <button className="btn btn-ghost" onClick={onClose}>Close</button>
-          {task.status === 'Assigned' && <button className="btn btn-primary" onClick={() => onStatus('En route')}><Icon name="Navigation" size={16} /> En route</button>}
-          {task.status === 'En route' && <button className="btn btn-primary" onClick={() => onStatus('On site')}><Icon name="MapPin" size={16} /> On site</button>}
+          {task.status === 'Assigned' && (
+            <button className="btn btn-primary" onClick={onStartNavigation}>
+              <Icon name="Navigation" size={16} /> Start Navigation
+            </button>
+          )}
+          {task.status === 'En route' && (
+            <button className="btn btn-primary" onClick={onStartNavigation}>
+              <Icon name="Navigation" size={16} /> Open Live Map
+            </button>
+          )}
           {task.status === 'On site' && (
             <button
               className="btn btn-success"

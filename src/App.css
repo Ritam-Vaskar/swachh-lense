@@ -1181,3 +1181,396 @@ table.reports tr:last-child td { border-bottom: none; }
   .verify-image-pair { grid-template-columns: 1fr; }
   .verify-modal-footer { flex-direction: column; }
 }
+
+/* ═══════════════════════════════════════════════════
+   WORKER NAVIGATION MODAL  (Zomato / Swiggy style)
+═══════════════════════════════════════════════════ */
+.nav-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease;
+}
+
+.nav-modal {
+  width: 100%;
+  max-width: 520px;
+  max-height: 96vh;
+  background: var(--surface);
+  border-radius: 24px 24px 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 -12px 48px rgba(0,0,0,0.25);
+  animation: slideUp 0.32s cubic-bezier(0.34,1.56,0.64,1);
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+
+/* ── Header ── */
+.nav-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.nav-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.nav-header-icon {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
+  display: grid; place-items: center;
+  color: white;
+  flex-shrink: 0;
+}
+.nav-header-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+.nav-header-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+.nav-close-btn {
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  cursor: pointer;
+  display: grid; place-items: center;
+  color: var(--text-muted);
+  transition: background 0.15s;
+}
+.nav-close-btn:hover { background: var(--border); }
+
+/* ── Status Steps ── */
+.nav-steps {
+  display: flex;
+  align-items: flex-start;
+  padding: 14px 20px 10px;
+  gap: 0;
+}
+.nav-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  position: relative;
+}
+.nav-step-dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  border: 2px solid var(--border);
+  z-index: 1;
+  transition: all 0.3s;
+}
+.nav-step.done .nav-step-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.nav-step.active .nav-step-dot {
+  background: var(--primary);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px rgba(14,165,233,0.2);
+  animation: pulse-ring 1.5s ease infinite;
+}
+@keyframes pulse-ring {
+  0%  { box-shadow: 0 0 0 0px rgba(14,165,233,0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(14,165,233,0); }
+  100%{ box-shadow: 0 0 0 0px rgba(14,165,233,0); }
+}
+.nav-step-line {
+  position: absolute;
+  top: 5px;
+  left: calc(50% + 8px);
+  right: calc(-50% + 8px);
+  height: 2px;
+  background: var(--border);
+}
+.nav-step.done .nav-step-line { background: var(--accent); }
+.nav-step-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-soft);
+  margin-top: 5px;
+  text-align: center;
+}
+.nav-step.active .nav-step-label { color: var(--primary); }
+.nav-step.done .nav-step-label  { color: var(--accent); }
+
+/* ── ETA Card ── */
+.nav-eta-card {
+  display: flex;
+  align-items: center;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  border-radius: var(--radius);
+  margin: 8px 16px 12px;
+  padding: 16px;
+  gap: 0;
+}
+.nav-eta-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.nav-eta-value {
+  font-size: 20px;
+  font-weight: 800;
+  color: white;
+  line-height: 1;
+}
+.nav-eta-value.primary { color: #38bdf8; }
+.nav-eta-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255,255,255,0.5);
+}
+.nav-eta-divider {
+  width: 1px;
+  height: 36px;
+  background: rgba(255,255,255,0.12);
+  margin: 0 8px;
+}
+
+/* ── Map ── */
+.nav-map-wrap {
+  flex: 1;
+  min-height: 260px;
+  max-height: 340px;
+  position: relative;
+  margin: 0 16px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.nav-map-placeholder {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-muted);
+}
+.nav-map-placeholder-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 20px;
+}
+.nav-map-placeholder-content p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.nav-no-gps-hint {
+  font-size: 12px !important;
+  color: var(--text-soft) !important;
+}
+
+/* Follow button */
+.nav-follow-btn {
+  position: absolute;
+  top: 10px; right: 10px;
+  z-index: 500;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: white;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  display: grid; place-items: center;
+  color: var(--text-muted);
+  box-shadow: var(--shadow);
+  transition: all 0.15s;
+}
+.nav-follow-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+.nav-follow-btn:hover  { box-shadow: var(--shadow-lg); }
+
+/* Route loading overlay */
+.nav-route-loading {
+  position: absolute;
+  bottom: 10px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: white;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-muted);
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+
+/* ── Worker Marker ── */
+.nav-worker-marker {
+  position: relative;
+  display: grid; place-items: center;
+}
+.nav-worker-pulse {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: rgba(22,163,74,0.25);
+  animation: workerPulse 2s ease infinite;
+}
+@keyframes workerPulse {
+  0%   { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+/* ── Destination Marker ── */
+.nav-dest-marker {
+  position: relative;
+  display: grid; place-items: center;
+}
+.nav-dest-pin { z-index: 1; }
+.nav-dest-pulse {
+  position: absolute;
+  bottom: -6px; left: 50%;
+  transform: translateX(-50%);
+  width: 20px; height: 8px;
+  border-radius: 50%;
+  background: rgba(239,68,68,0.35);
+  animation: shadowPulse 2s ease infinite;
+}
+@keyframes shadowPulse {
+  0%,100% { transform: translateX(-50%) scaleX(1); opacity: 0.8; }
+  50%      { transform: translateX(-50%) scaleX(1.3); opacity: 0.4; }
+}
+
+/* ── Destination Info Bar ── */
+.nav-dest-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 16px 0;
+  padding: 12px 14px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.nav-dest-icon-wrap {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: rgba(239,68,68,0.1);
+  color: #ef4444;
+  display: grid; place-items: center;
+  flex-shrink: 0;
+}
+.nav-dest-address {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+}
+.nav-dest-cat {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+/* ── Arrived Banner ── */
+.nav-arrived-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 16px 0;
+  padding: 12px 16px;
+  background: rgba(22,163,74,0.1);
+  border: 1px solid rgba(22,163,74,0.3);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  animation: fadeIn 0.4s ease;
+}
+
+/* ── Footer ── */
+.nav-modal-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 20px;
+  border-top: 1px solid var(--border);
+  margin-top: 12px;
+}
+.nav-sim-btn { font-size: 12px; }
+.nav-arrive-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* ── Spinners ── */
+.nav-spinner {
+  width: 32px; height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.nav-spinner-sm {
+  width: 14px; height: 14px;
+  border: 2px solid rgba(14,165,233,0.3);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Desktop center alignment ── */
+@media (min-width: 521px) {
+  .nav-modal-overlay { align-items: center; }
+  .nav-modal {
+    border-radius: 24px;
+    max-height: 90vh;
+  }
+}
+
+/* ── Navigation trigger button glow on En route ── */
+.task-card .nav-active-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg,#0ea5e9,#16a34a);
+  color: white;
+  animation: glow-badge 2s ease infinite alternate;
+}
+@keyframes glow-badge {
+  from { box-shadow: 0 0 0 0 rgba(14,165,233,0.4); }
+  to   { box-shadow: 0 0 12px 4px rgba(14,165,233,0.35); }
+}

@@ -72,23 +72,25 @@ async function createReportRecord(data) {
     citizen_phone = '',
     image_url = null,
     source = 'citizen', // 'citizen' | 'operator'
+    municipality_id = null,
+    municipality_name = null,
   } = data
 
   const citizenUpdate = 'Report received and queued for AI analysis.'
 
-    const { rows } = await pool.query(
+  const { rows } = await pool.query(
     `INSERT INTO swachhlens_reports (
        id, reference_code, category, location, zone,
        latitude, longitude, volume, hazard_flag, description,
        resident_name, citizen_phone, image_url, status, approval_status,
        citizen_update, priority, severity_score, confidence, team_size,
-       duplicate_count, ai_analysis, created_at, updated_at
+       duplicate_count, ai_analysis, municipality_id, municipality_name, created_at, updated_at
      ) VALUES (
        $1,$2,$3,$4,$5,
        $6,$7,$8,$9,$10,
        $11,$12,$13,'New',$14,
        $15,$16,$17,$18,$19,
-       1,$20,now(),now()
+       1,$20,$21,$22,now(),now()
      ) RETURNING *`,
     [
       id, referenceCode, category, (location || `GPS ${latitude?.toFixed(4)}, ${longitude?.toFixed(4)}`).trim(), zone,
@@ -96,7 +98,8 @@ async function createReportRecord(data) {
       resident_name || 'Citizen', citizen_phone || '', image_url || null,
       data.ai_analysis?.autoApproved ? 'Auto-approved' : 'Pending',
       citizenUpdate, data.ai_analysis?.priority || 'Medium', data.ai_analysis?.severity_score || 50, 
-      data.ai_analysis?.confidence || 0, data.ai_analysis?.team_size || 1, data.ai_analysis ? JSON.stringify(data.ai_analysis) : null
+      data.ai_analysis?.confidence || 0, data.ai_analysis?.team_size || 1, data.ai_analysis ? JSON.stringify(data.ai_analysis) : null,
+      municipality_id || null, municipality_name || null,
     ],
   )
 

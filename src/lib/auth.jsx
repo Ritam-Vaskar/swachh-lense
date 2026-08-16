@@ -18,7 +18,7 @@ export function AuthProvider({ children }) {
     const { data: sub } = api.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession)
       if (newSession) {
-        ;(async () => loadProfile(newSession.user.id))()
+        ; (async () => loadProfile(newSession.user.id))()
       } else {
         setProfile(null)
         setLoading(false)
@@ -33,6 +33,12 @@ export function AuthProvider({ children }) {
     setLoading(false)
   }
 
+  /** Re-fetch profile from server — useful after municipality_id is assigned. */
+  async function refreshProfile() {
+    const { data: s } = await api.auth.getSession()
+    if (s?.session?.user?.id) await loadProfile(s.session.user.id)
+  }
+
   async function ensureProfile(user, role, extra = {}) {
     const { data: existing } = await api.from('profiles').select('id').eq('id', user.id).maybeSingle()
     if (existing) {
@@ -45,15 +51,16 @@ export function AuthProvider({ children }) {
       full_name: extra.full_name || user.email?.split('@')[0] || 'Team member',
       phone: extra.phone || '',
       zone: extra.zone || 'Central',
+      municipality_id: extra.municipality_id || null,
     }
     const { data } = await api.from('profiles').insert(row).select().single()
     setProfile(data)
   }
 
-  async function signUp({ email, password, role, full_name, phone, zone }) {
-    const { data, error } = await api.auth.signUp({ email, password })
+  async function signUp({ email, password, role, full_name, phone, zone, municipality_id }) {
+    const { data, error } = await api.auth.signUp({ email, password, role, full_name, phone, zone, municipality_id })
     if (error) return { error }
-    if (data.user) await ensureProfile(data.user, role, { full_name, phone, zone })
+    if (data.user) await ensureProfile(data.user, role, { full_name, phone, zone, municipality_id })
     return { error: null }
   }
 
@@ -70,7 +77,10 @@ export function AuthProvider({ children }) {
     setProfile(null)
   }
 
-  const value = { session, profile, loading, signIn, signUp, signOut, ensureProfile }
+  // Derived convenience value — undefined-safe
+  const municipalityId = profile?.municipality_id ?? null
+
+  const value = { session, profile, loading, municipalityId, signIn, signUp, signOut, ensureProfile, refreshProfile }
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

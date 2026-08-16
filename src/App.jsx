@@ -9,6 +9,7 @@ import AuthScreen from './components/AuthScreen'
 import CitizenPortal from './components/CitizenPortal'
 import WorkerDashboard from './components/WorkerDashboard'
 import MapView from './components/MapView'
+import MunicipalityHeader from './components/MunicipalityHeader'
 import {
   statusColors,
   priorityColors,
@@ -61,7 +62,8 @@ export default function App() {
 }
 
 function OperatorDashboard() {
-  const { profile, signOut } = useAuth()
+  const { profile, signOut, municipalityId } = useAuth()
+  const [activeMuniId, setActiveMuniId] = useState(municipalityId || null)
   const [reports, setReports] = useState([])
   const [workers, setWorkers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -76,6 +78,10 @@ function OperatorDashboard() {
   const [toasts, setToasts] = useState([])
   const [seeding, setSeeding] = useState(false)
 
+  useEffect(() => {
+    setActiveMuniId(municipalityId || null)
+  }, [municipalityId])
+
   const toast = useCallback((message, type = 'info') => {
     const id = Date.now() + Math.random()
     setToasts((t) => [...t, { id, message, type }])
@@ -84,16 +90,22 @@ function OperatorDashboard() {
 
   const loadReports = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await api.from('swachhlens_reports').select('*').order('reported_at', { ascending: false })
+    // Operators see only their municipality's reports; superadmin / national view (no activeMuniId) sees all
+    let query = api.from('swachhlens_reports').select('*').order('reported_at', { ascending: false })
+    if (activeMuniId) query = query.eq('municipality_id', activeMuniId)
+    const { data, error } = await query
     if (error) toast('Could not load reports.', 'error')
     else setReports(data || [])
     setLoading(false)
-  }, [toast])
+  }, [toast, activeMuniId])
 
   const loadWorkers = useCallback(async () => {
-    const { data } = await api.from('profiles').select('*').eq('role', 'worker')
+    // Workers are also scoped to municipality when activeMuniId is set
+    let query = api.from('profiles').select('*').eq('role', 'worker')
+    if (activeMuniId) query = query.eq('municipality_id', activeMuniId)
+    const { data } = await query
     setWorkers(data || [])
-  }, [])
+  }, [activeMuniId])
 
   useEffect(() => {
     ;(async () => {
@@ -107,13 +119,16 @@ function OperatorDashboard() {
       await loadWorkers()
     })()
 
-    // Realtime subscriptions
+    // Realtime subscriptions — INSERT events are filtered client-side by municipality
     const reportSub = api
-      .channel('reports-rt')
+      .channel(`reports-rt-${activeMuniId || 'all'}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'swachhlens_reports' }, (payload) => {
         if (payload.eventType === 'INSERT' && payload.new?.id) {
-          setReports((r) => [payload.new, ...r])
-          toast('New report received from citizen.', 'success')
+          // Only add to state if it belongs to this active municipality (or unscoped)
+          if (!activeMuniId || payload.new.municipality_id === activeMuniId) {
+            setReports((r) => [payload.new, ...r])
+            toast('New report received from citizen.', 'success')
+          }
         } else if (payload.eventType === 'UPDATE' && payload.new?.id) {
           setReports((r) => r.map((x) => (x.id === payload.new.id ? { ...x, ...payload.new } : x)))
         } else if (payload.eventType === 'DELETE' && payload.old?.id) {
@@ -123,7 +138,7 @@ function OperatorDashboard() {
       .subscribe()
 
     return () => api.removeChannel(reportSub)
-  }, [loadReports, loadWorkers, toast])
+  }, [loadReports, loadWorkers, toast, activeMuniId])
 
   function handleChanged(updated) {
     setReports((list) => list.map((r) => (r.id === updated.id ? updated : r)))
@@ -192,11 +207,17 @@ function OperatorDashboard() {
           <div>SwachhLens<div className="brand-sub">Operations · {profile?.full_name}</div></div>
         </div>
         <div className="topbar-actions">
-          <span className="live-pill"><span className="live-dot" /> Live</span>
           <button className="btn btn-primary" onClick={() => setShowNew(true)}><Icon name="Plus" size={16} /> New report</button>
           <button className="btn btn-ghost btn-sm" onClick={() => signOut()}><Icon name="LogOut" size={14} /> Sign out</button>
         </div>
       </header>
+
+      {/* Municipality context bar & live switcher */}
+      <MunicipalityHeader
+        municipalityId={activeMuniId}
+        onSelectMunicipality={setActiveMuniId}
+        reports={reports}
+      />
 
       <div className="workspace">
         <aside className="sidebar">
@@ -331,7 +352,7 @@ function OperatorDashboard() {
         </main>
       </div>
 
-      <NewReportModal open={showNew} onClose={() => setShowNew(false)} onCreated={handleCreated} />
+      <NewReportModal open={showNew} onClose={() => setShowNew(false)} onCreated={handleCreated} municipalityId={activeMuniId} />
       <ReportDrawer report={selected} onClose={() => setSelected(null)} onChanged={handleChanged} toast={toast} />
 
       <div className="toast-container">
@@ -345,6 +366,14 @@ function MapDashboard({ reports, workers, onSelect, selectedId }) {
   const geoReports = reports.filter((r) => r.latitude != null)
   const [mapView, setMapView] = useState('all')
   const shown = mapView === 'pending' ? geoReports.filter((r) => r.approval_status === 'Pending') : geoReports
+
+  // Derive map center from visible reports — auto-follows whichever municipality is active
+  const mapCenter = useMemo(() => {
+    if (geoReports.length === 0) return [20.5937, 78.9629] // India center fallback
+    const avgLat = geoReports.reduce((s, r) => s + r.latitude, 0) / geoReports.length
+    const avgLng = geoReports.reduce((s, r) => s + r.longitude, 0) / geoReports.length
+    return [avgLat, avgLng]
+  }, [geoReports])
 
   return (
     <>
@@ -360,7 +389,7 @@ function MapDashboard({ reports, workers, onSelect, selectedId }) {
           </div>
         </div>
         <div className="panel-body">
-          <MapView reports={shown} workers={workers} center={[12.9716, 77.5946]} zoom={12} height={520} showWorkers onMarkerClick={onSelect} selectedId={selectedId} />
+          <MapView reports={shown} workers={workers} center={mapCenter} zoom={12} height={520} showWorkers onMarkerClick={onSelect} selectedId={selectedId} />
         </div>
       </div>
       <div className="panel">

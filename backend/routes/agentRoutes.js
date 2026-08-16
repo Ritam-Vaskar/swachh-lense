@@ -14,17 +14,47 @@
 
 import { Router } from 'express'
 import { runIntakeAgent } from '../agents/intakeAgent.js'
+import { resolveMunicipality } from '../lib/municipalityResolver.js'
 
 const router = Router()
 
 // ---------------------------------------------------------------------------
 // POST /api/agents/intake
+// Saves the report immediately, then resolves municipality in the background.
+// This is deliberately non-blocking: a Nominatim timeout must NEVER delay
+// the citizen-facing response.
 // ---------------------------------------------------------------------------
 router.post('/intake', async (req, res) => {
   try {
     const result = await runIntakeAgent(req.body || {})
     if (!result.success) return res.status(400).json({ error: result.error })
+
+    // Respond to the citizen immediately — municipality lookup is fire-and-forget
     res.status(201).json(result)
+
+    // Background: resolve municipality from GPS and patch the report row
+    const { report } = result
+    if (report?.id && report?.latitude != null && report?.longitude != null) {
+      setImmediate(async () => {
+        try {
+          const muni = await resolveMunicipality(report.latitude, report.longitude)
+          if (muni) {
+            const { getPool } = await import('../models/database.js')
+            const pool = getPool()
+            await pool.query(
+              `UPDATE swachhlens_reports
+               SET municipality_id = $1, municipality_name = $2, updated_at = now()
+               WHERE id = $3 AND municipality_id IS NULL`,
+              [muni.id, muni.name, report.id]
+            )
+            console.info(`[Route /intake] Report ${report.id} → municipality "${muni.name}" (${muni.slug})`)
+          }
+        } catch (err) {
+          // Never crash the server over a background geocode failure
+          console.error('[Route /intake] Municipality resolution error:', err.message)
+        }
+      })
+    }
   } catch (err) {
     console.error('[Route /agents/intake]', err)
     res.status(500).json({ error: 'Intake agent encountered an unexpected error.' })

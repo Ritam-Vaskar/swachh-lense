@@ -89,6 +89,123 @@ body {
   gap: 14px;
 }
 
+/* ---------- Municipality Header ---------- */
+.municipality-header {
+  position: sticky;
+  top: 64px;
+  z-index: 38;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 0 24px;
+  height: 48px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 0 0 rgba(0,0,0,0.04);
+  animation: muniSlideIn 0.25s ease;
+}
+
+@keyframes muniSlideIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.muni-accent-bar {
+  width: 4px;
+  height: 28px;
+  border-radius: 99px;
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+
+.muni-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.muni-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1;
+}
+
+.muni-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: muni-pulse 2.5s infinite;
+}
+
+@keyframes muni-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+
+.muni-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.muni-geo {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  padding: 1px 7px;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+
+.muni-sub {
+  font-size: 10.5px;
+  color: var(--text-soft);
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.muni-kpis {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.muni-kpi {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.muni-kpi-value {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+}
+
+.muni-kpi-label {
+  font-size: 10px;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.muni-live {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+
 .live-pill {
   display: inline-flex;
   align-items: center;
@@ -1574,3 +1691,245 @@ table.reports tr:last-child td { border-bottom: none; }
   from { box-shadow: 0 0 0 0 rgba(14,165,233,0.4); }
   to   { box-shadow: 0 0 12px 4px rgba(14,165,233,0.35); }
 }
+
+/* ---------- Auth Screen & Multi-Tenant Login ---------- */
+.auth-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: radial-gradient(circle at 50% 20%, rgba(14, 165, 233, 0.08) 0%, rgba(244, 246, 251, 1) 70%);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+  padding: 32px 28px;
+}
+
+.auth-brand {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.auth-brand .brand-mark {
+  margin: 0 auto 12px;
+  width: 44px;
+  height: 44px;
+}
+
+.auth-brand h1 {
+  font-size: 22px;
+  font-weight: 800;
+  margin: 0 0 6px;
+  color: var(--text);
+}
+
+.auth-brand p {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.auth-tabs {
+  display: flex;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  margin-bottom: 20px;
+  gap: 4px;
+}
+
+.auth-tabs button {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 8px 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.auth-tabs button.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Demo presets bar */
+.auth-demo-presets {
+  margin-bottom: 18px;
+  padding: 12px;
+  background: #f0fdf4;
+  border: 1px dashed #86efac;
+  border-radius: 12px;
+}
+
+.demo-presets-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #15803d;
+  margin-bottom: 8px;
+}
+
+.demo-presets-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.demo-preset-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #ffffff;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.demo-preset-btn:hover {
+  border-color: #22c55e;
+  background: #f7fee7;
+  transform: translateY(-1px);
+}
+
+.demo-preset-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.demo-preset-text strong {
+  display: block;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.demo-preset-text small {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.auth-role {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.auth-role button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  gap: 4px;
+  transition: all 0.15s;
+}
+
+.auth-role button small {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-soft);
+}
+
+.auth-role button.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+}
+
+.form-help {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  display: block;
+}
+
+.auth-error {
+  font-size: 12px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin: 12px 0 0;
+}
+
+.auth-submit {
+  width: 100%;
+  margin-top: 16px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.auth-citizen {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.auth-citizen p {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 8px;
+}
+
+/* Municipality Switcher Dropdown inside Header */
+.muni-switcher-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+.muni-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: #ffffff;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 4px 28px 4px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: all 0.15s;
+}
+
+.muni-select:hover {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.15);
+}
+
+.muni-select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+}
+

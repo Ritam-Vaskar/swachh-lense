@@ -16,7 +16,7 @@ async function callIntakeAgent(payload) {
   return data
 }
 
-export default function NewReportModal({ open, onClose, onCreated }) {
+export default function NewReportModal({ open, onClose, onCreated, municipalityId = null }) {
   const [form, setForm] = useState({
     category: REPORT_CATEGORIES[0],
     location: '',
@@ -110,6 +110,7 @@ export default function NewReportModal({ open, onClose, onCreated }) {
         citizen_phone: form.phone,
         image_url: imageUrl,
         source: 'operator',
+        municipality_id: municipalityId || null,
       })
       setPipelineStatus('done')
       setSaving(false)

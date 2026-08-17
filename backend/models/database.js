@@ -3,8 +3,13 @@ import { Pool } from 'pg'
 import { DEMO_ACCOUNTS, SCHEMA_SQL, SAMPLE_TASKS, SEED_REPORTS, makeId } from './schema.js'
 import { analyzeReport } from '../lib/ai.js'
 
-const connectionString = process.env.DATABASE_URL || 'postgres://swachhlens:swachhlens@localhost:5432/swachhlens'
-const pool = new Pool({ connectionString })
+// const connectionString = process.env.DATABASE_URL || 'postgres://swachhlens:swachhlens@localhost:5432/swachhlens'
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex')

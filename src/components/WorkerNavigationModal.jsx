@@ -170,7 +170,7 @@ function StatusSteps({ status }) {
 }
 
 // ─── Main Navigation Modal ───────────────────────────────────────────────────
-export default function WorkerNavigationModal({ task, workerProfile, onClose, onArrivedOnSite }) {
+export default function WorkerNavigationModal({ task, workerProfile, onClose, onArrivedOnSite, onGpsUpdate }) {
   const report = task?.report
 
   // Destination coords
@@ -178,14 +178,11 @@ export default function WorkerNavigationModal({ task, workerProfile, onClose, on
   const destLng = report?.longitude || task?.longitude || 77.6050
   const destPos = [destLat, destLng]
 
-  // Worker position state - if worker coords are missing or too far, auto-place near task
+  // Worker position state - prioritize live workerProfile coordinates
   const initialWorkerPos = (() => {
-    if (workerProfile?.latitude && workerProfile?.longitude) {
-      // If worker is within 50km of destination, use it, else place within 1.5km
-      const dist = haversineKm([workerProfile.latitude, workerProfile.longitude], destPos)
-      if (dist < 80) return [workerProfile.latitude, workerProfile.longitude]
+    if (workerProfile?.latitude != null && workerProfile?.longitude != null) {
+      return [workerProfile.latitude, workerProfile.longitude]
     }
-    // Default: place worker ~1.2 km away from task destination for a realistic route
     return [destLat - 0.009, destLng - 0.012]
   })()
 
@@ -198,6 +195,8 @@ export default function WorkerNavigationModal({ task, workerProfile, onClose, on
   const [following, setFollowing] = useState(true)
   const [simulating, setSimulating] = useState(false)
   const [arrived, setArrived] = useState(false)
+  const [gpsLive, setGpsLive] = useState(false)
+  const [gpsAccuracy, setGpsAccuracy] = useState(null)
 
   const simRef = useRef(null)
   const simIndexRef = useRef(0)
@@ -217,41 +216,44 @@ export default function WorkerNavigationModal({ task, workerProfile, onClose, on
     }
   }, [destLat, destLng]) // eslint-disable-line
 
-  // ─── Start GPS watch (if real GPS active) ──────────────────────────────────
-  useEffect(() => {
+  const hasAcquiredRef = useRef(false)
+
+  // ─── Acquire High Accuracy Live Device GPS ─────────────────────────────────
+  const acquireLiveGps = useCallback(() => {
     if (!navigator.geolocation) return
-    watchRef.current = navigator.geolocation.watchPosition(
+    navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const newPos = [pos.coords.latitude, pos.coords.longitude]
+        const livePos = [pos.coords.latitude, pos.coords.longitude]
         setWorkerPos((prev) => {
-          if (prev) {
-            setHeading(computeHeading(prev, newPos))
-          }
-          return newPos
+          if (prev) setHeading(computeHeading(prev, livePos))
+          return livePos
         })
+        setGpsLive(true)
+        setGpsAccuracy(Math.round(pos.coords.accuracy))
+        onGpsUpdate?.(pos.coords.latitude, pos.coords.longitude)
+        loadRoute(livePos)
       },
-      () => {},
-      { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
+      (err) => {
+        console.warn('[WorkerNav] Could not acquire immediate GPS position:', err.message)
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 },
     )
-    return () => {
-      if (watchRef.current) navigator.geolocation.clearWatch(watchRef.current)
-    }
-  }, [])
+  }, [loadRoute, onGpsUpdate])
 
-  // ─── Fetch route on workerPos ready ────────────────────────────────────────
   useEffect(() => {
-    if (workerPos && destPos) {
-      loadRoute(workerPos)
-    }
-  }, [workerPos?.[0], workerPos?.[1]]) // eslint-disable-line
+    if (hasAcquiredRef.current) return
+    hasAcquiredRef.current = true
+    acquireLiveGps()
+  }, [acquireLiveGps])
 
-  // ─── Live distance recalc ────────────────────────────────────────────────
+  // ─── Live distance recalc with 150m geofence ──────────────────────────────
   useEffect(() => {
     if (workerPos && destPos) {
       const km = haversineKm(workerPos, destPos)
-      setDistanceKm(km.toFixed(1))
+      setDistanceKm(km < 1 ? (km * 1000).toFixed(0) + ' m' : km.toFixed(1) + ' km')
       setEtaMin(Math.max(1, Math.ceil((km / 30) * 60)))
-      if (km < 0.08) setArrived(true)
+      // Geofence: worker must be within 150 meters (0.15 km)
+      setArrived(km <= 0.15)
     }
   }, [workerPos?.[0], workerPos?.[1]]) // eslint-disable-line
 
@@ -289,12 +291,16 @@ export default function WorkerNavigationModal({ task, workerProfile, onClose, on
   // ─── Open in Google Maps ─────────────────────────────────────────────────
   function openGoogleMaps() {
     if (!destPos) return
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${destPos[0]},${destPos[1]}&travelmode=driving`
+    const originParam = workerPos ? `&origin=${workerPos[0]},${workerPos[1]}` : ''
+    const url = `https://www.google.com/maps/dir/?api=1${originParam}&destination=${destPos[0]},${destPos[1]}&travelmode=driving`
     window.open(url, '_blank')
   }
 
   // ─── Handle Arrived ──────────────────────────────────────────────────────
   function handleArrived() {
+    if (!arrived) {
+      return
+    }
     stopSimulation()
     onArrivedOnSite()
   }
@@ -310,12 +316,26 @@ export default function WorkerNavigationModal({ task, workerProfile, onClose, on
             </div>
             <div>
               <div className="nav-header-title">Live Navigation</div>
-              <div className="nav-header-sub">{report?.location || 'En route to site'}</div>
+              <div className="nav-header-sub">
+                {report?.location || `GPS ${destLat.toFixed(4)}, ${destLng.toFixed(4)}`}
+              </div>
             </div>
           </div>
-          <button className="nav-close-btn" onClick={onClose}>
-            <Icon name="X" size={20} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              className={`live-pill ${gpsLive ? '' : 'busy'}`}
+              style={{ cursor: 'pointer', border: 'none', padding: '4px 10px', fontSize: 12 }}
+              onClick={acquireLiveGps}
+              title={gpsLive ? `Live GPS Locked: ${workerPos[0]?.toFixed(4)}, ${workerPos[1]?.toFixed(4)} (±${gpsAccuracy || 10}m)` : 'Click to acquire live GPS'}
+            >
+              <span className="live-dot" style={{ background: gpsLive ? '#16a34a' : '#f59e0b' }} />
+              {gpsLive ? `Live GPS (±${gpsAccuracy || 10}m)` : 'Acquiring GPS…'}
+            </button>
+            <button className="nav-close-btn" onClick={onClose}>
+              <Icon name="X" size={20} />
+            </button>
+          </div>
         </div>
 
         {/* ── Status Steps ── */}
@@ -325,16 +345,16 @@ export default function WorkerNavigationModal({ task, workerProfile, onClose, on
         <div className="nav-eta-card">
           <div className="nav-eta-item">
             <div className="nav-eta-value">
-              {distanceKm !== null ? `${distanceKm} km` : '0.9 km'}
+              {distanceKm !== null ? distanceKm : 'Calculating…'}
             </div>
-            <div className="nav-eta-label">Distance</div>
+            <div className="nav-eta-label">Distance to Site</div>
           </div>
           <div className="nav-eta-divider" />
           <div className="nav-eta-item nav-eta-center">
             <div className="nav-eta-value primary">
               {etaMin !== null ? `~${etaMin} min` : '~3 min'}
             </div>
-            <div className="nav-eta-label">ETA</div>
+            <div className="nav-eta-label">Live ETA</div>
           </div>
           <div className="nav-eta-divider" />
           <div className="nav-eta-item">
@@ -392,8 +412,11 @@ export default function WorkerNavigationModal({ task, workerProfile, onClose, on
           {/* Follow / Unfollow toggle */}
           <button
             className={`nav-follow-btn ${following ? 'active' : ''}`}
-            onClick={() => setFollowing((f) => !f)}
-            title={following ? 'Following your location' : 'Click to re-center'}
+            onClick={() => {
+              setFollowing((f) => !f)
+              acquireLiveGps()
+            }}
+            title={following ? 'Centering on live GPS' : 'Click to re-center on live GPS'}
           >
             <Icon name={following ? 'Crosshair' : 'Navigation'} size={18} />
           </button>
@@ -402,7 +425,7 @@ export default function WorkerNavigationModal({ task, workerProfile, onClose, on
           {routeLoading && (
             <div className="nav-route-loading">
               <div className="nav-spinner-sm" />
-              <span>Calculating route…</span>
+              <span>Calculating live route…</span>
             </div>
           )}
         </div>
@@ -418,11 +441,18 @@ export default function WorkerNavigationModal({ task, workerProfile, onClose, on
           </div>
         </div>
 
-        {/* ── Arrived Banner ── */}
-        {arrived && (
+        {/* ── Proximity Status Banner ── */}
+        {arrived ? (
           <div className="nav-arrived-banner">
             <Icon name="CheckCircle2" size={18} />
-            <span>You are near the site! Mark yourself as On Site to begin cleanup.</span>
+            <span>✓ You have arrived at the site! Click below to confirm On Site and submit cleanup photos.</span>
+          </div>
+        ) : (
+          <div className="nav-dest-info" style={{ background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.25)', borderRadius: 8, padding: '10px 14px', margin: '0 16px 12px' }}>
+            <Icon name="AlertCircle" size={16} style={{ color: '#ca8a04', flexShrink: 0 }} />
+            <div style={{ fontSize: 12.5, color: '#ca8a04', lineHeight: 1.4 }}>
+              <strong>Geofence Active:</strong> You must be physically at the location (within 150m) to mark yourself On Site. Currently <strong>{distanceKm || 'far away'}</strong>.
+            </div>
           </div>
         )}
 
@@ -437,6 +467,7 @@ export default function WorkerNavigationModal({ task, workerProfile, onClose, on
               className="btn btn-ghost nav-sim-btn"
               onClick={startSimulation}
               disabled={routeLoading || routeCoords.length < 2}
+              title="Simulate driving along the route to reach the site"
             >
               <Icon name="Play" size={15} /> Simulate Drive
             </button>
@@ -446,9 +477,20 @@ export default function WorkerNavigationModal({ task, workerProfile, onClose, on
             </button>
           )}
 
-          <button className="btn btn-success nav-arrive-btn" onClick={handleArrived}>
-            <Icon name="MapPin" size={16} /> Arrived On Site
-          </button>
+          {arrived ? (
+            <button className="btn btn-success nav-arrive-btn" onClick={handleArrived}>
+              <Icon name="CheckCircle2" size={16} /> Arrived On Site
+            </button>
+          ) : (
+            <button
+              className="btn btn-secondary nav-arrive-btn"
+              disabled
+              style={{ opacity: 0.6, cursor: 'not-allowed', background: 'var(--surface-muted)', border: '1px solid var(--border)' }}
+              title={`Locked: You must be within 150m of the site to check in. Currently ${distanceKm || 'far'} away.`}
+            >
+              <Icon name="Lock" size={15} /> Arrived On Site ({distanceKm || 'Locked'})
+            </button>
+          )}
         </div>
       </div>
     </div>

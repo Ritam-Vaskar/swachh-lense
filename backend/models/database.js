@@ -221,6 +221,18 @@ export async function ensureUser({ email, password, role, full_name, phone, zone
   const existing = await pool.query('SELECT * FROM app_users WHERE email = $1 LIMIT 1', [email])
   if (existing.rows[0]) {
     const user = existing.rows[0]
+    await pool.query(
+      `UPDATE profiles SET 
+         role = COALESCE($1, role), 
+         full_name = COALESCE($2, full_name), 
+         phone = COALESCE($3, phone), 
+         zone = COALESCE($4, zone), 
+         latitude = COALESCE($5, latitude), 
+         longitude = COALESCE($6, longitude), 
+         is_available = COALESCE($7, is_available) 
+       WHERE id = $8`,
+      [role, full_name, phone, zone, latitude, longitude, is_available, user.id],
+    )
     const profile = await getProfileByUserId(user.id)
     return { user: publicUser(user), profile }
   }
@@ -246,11 +258,10 @@ export async function signInUser({ email, password }) {
 }
 
 async function seedUsersIfNeeded() {
-  const { rows } = await pool.query('SELECT COUNT(*)::int AS count FROM app_users')
-  if (rows[0]?.count > 0) return
-
   for (const account of DEMO_ACCOUNTS) {
-    await signUpUser(account).catch(() => null)
+    await ensureUser(account).catch((err) => {
+      console.warn(`[SeedUsers] Note for ${account.email}:`, err.message)
+    })
   }
 }
 

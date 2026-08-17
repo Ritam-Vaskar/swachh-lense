@@ -1,6 +1,6 @@
 import { generateReferenceCode, generateTaskCode } from './constants.js'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
+const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || 'http://localhost:3001'
 const SESSION_KEY = 'swachhlens-session-v1'
 const authListeners = new Set()
 const channelListeners = new Set()
@@ -162,10 +162,10 @@ function makeAuthApi() {
 				},
 			}
 		},
-		async signUp({ email, password, role, full_name, phone, zone }) {
+		async signUp({ email, password, role, full_name, phone, zone, latitude, longitude }) {
 			const result = await request('/api/auth/signup', {
 				method: 'POST',
-				body: JSON.stringify({ email, password, role, full_name, phone, zone }),
+				body: JSON.stringify({ email, password, role, full_name, phone, zone, latitude, longitude }),
 			})
 			return { data: result, error: null }
 		},

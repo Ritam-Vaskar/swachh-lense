@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '../lib/auth'
 import { Icon } from './ui'
 import { ZONES } from '../lib/api/index.js'
@@ -8,12 +8,35 @@ export default function AuthScreen({ onCitizen }) {
   const [mode, setMode] = useState('signin')
   const [role, setRole] = useState('operator')
   const [form, setForm] = useState({ email: '', password: '', full_name: '', phone: '', zone: 'Central' })
+  const [gps, setGps] = useState(null)
+  const [detectingGps, setDetectingGps] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
   function update(key, value) {
     setForm((f) => ({ ...f, [key]: value }))
   }
+
+  function detectLocation() {
+    if (!navigator.geolocation) return
+    setDetectingGps(true)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGps({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+        setDetectingGps(false)
+      },
+      () => {
+        setDetectingGps(false)
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+
+  useEffect(() => {
+    if (mode === 'signup' && role === 'worker' && !gps) {
+      detectLocation()
+    }
+  }, [mode, role])
 
   async function submit(e) {
     e.preventDefault()
@@ -28,9 +51,14 @@ export default function AuthScreen({ onCitizen }) {
         setBusy(false)
         return
       }
-      const { error } = await signUp({ ...form, role })
+      const { error } = await signUp({
+        ...form,
+        role,
+        latitude: role === 'worker' ? (gps?.lat ?? null) : null,
+        longitude: role === 'worker' ? (gps?.lng ?? null) : null,
+      })
       if (error) setError(error.message.includes('already') ? 'An account with this email already exists.' : error.message)
-      else setError('Check your email — but since confirmation is off, try signing in now.')
+      else setError('Account created! Try signing in now.')
     }
     setBusy(false)
   }
@@ -56,7 +84,7 @@ export default function AuthScreen({ onCitizen }) {
                 <Icon name="LayoutDashboard" size={18} /> Operator
                 <small>Municipality / NGO dashboard</small>
               </button>
-              <button type="button" className={role === 'worker' ? 'active' : ''} onClick={() => setRole('worker')}>
+              <button type="button" className={role === 'worker' ? 'active' : ''} onClick={() => { setRole('worker'); detectLocation() }}>
                 <Icon name="HardHat" size={18} /> Worker
                 <small>Field cleanup crew</small>
               </button>
@@ -66,7 +94,7 @@ export default function AuthScreen({ onCitizen }) {
           {mode === 'signup' && (
             <div className="form-group">
               <label>Full name</label>
-              <input value={form.full_name} onChange={(e) => update('full_name', e.target.value)} placeholder="Your name" />
+              <input value={form.full_name} onChange={(e) => update('full_name', e.target.value)} placeholder="Your name (e.g. Murshidabad Squad)" />
             </div>
           )}
 
@@ -91,6 +119,15 @@ export default function AuthScreen({ onCitizen }) {
                 <select value={form.zone} onChange={(e) => update('zone', e.target.value)}>
                   {ZONES.map((z) => <option key={z} value={z}>{z}</option>)}
                 </select>
+              </div>
+              <div className="form-group" style={{ fontSize: 13, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>
+                  <Icon name="Navigation" size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />
+                  {gps ? `GPS: ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : detectingGps ? 'Detecting current GPS location…' : 'GPS location will be auto-updated'}
+                </span>
+                <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '2px 6px', fontSize: 11 }} onClick={detectLocation} disabled={detectingGps}>
+                  {detectingGps ? 'Locating…' : 'Refresh GPS'}
+                </button>
               </div>
             </>
           )}

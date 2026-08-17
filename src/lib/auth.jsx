@@ -45,15 +45,17 @@ export function AuthProvider({ children }) {
       full_name: extra.full_name || user.email?.split('@')[0] || 'Team member',
       phone: extra.phone || '',
       zone: extra.zone || 'Central',
+      latitude: extra.latitude ?? null,
+      longitude: extra.longitude ?? null,
     }
     const { data } = await api.from('profiles').insert(row).select().single()
     setProfile(data)
   }
 
-  async function signUp({ email, password, role, full_name, phone, zone }) {
-    const { data, error } = await api.auth.signUp({ email, password })
+  async function signUp({ email, password, role, full_name, phone, zone, latitude, longitude }) {
+    const { data, error } = await api.auth.signUp({ email, password, role, full_name, phone, zone, latitude, longitude })
     if (error) return { error }
-    if (data.user) await ensureProfile(data.user, role, { full_name, phone, zone })
+    if (data.user) await ensureProfile(data.user, role, { full_name, phone, zone, latitude, longitude })
     return { error: null }
   }
 

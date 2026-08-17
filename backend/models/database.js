@@ -197,7 +197,7 @@ function publicUser(user) {
   return { id: user.id, email: user.email, created_at: user.created_at }
 }
 
-export async function signUpUser({ email, password, role, full_name, phone, zone }) {
+export async function signUpUser({ email, password, role, full_name, phone, zone, latitude, longitude }) {
   const existing = await pool.query('SELECT * FROM app_users WHERE email = $1 LIMIT 1', [email])
   if (existing.rows[0]) throw new Error('An account with this email already exists.')
 
@@ -205,8 +205,8 @@ export async function signUpUser({ email, password, role, full_name, phone, zone
   const userId = makeId()
   await pool.query('INSERT INTO app_users (id, email, password_hash) VALUES ($1, $2, $3)', [userId, email, password_hash])
   await pool.query(
-    'INSERT INTO profiles (id, role, full_name, phone, zone, is_available) VALUES ($1, $2, $3, $4, $5, true)',
-    [userId, role || 'worker', full_name || email.split('@')[0], phone || '', zone || 'Central'],
+    'INSERT INTO profiles (id, role, full_name, phone, zone, latitude, longitude, is_available) VALUES ($1, $2, $3, $4, $5, $6, $7, true)',
+    [userId, role || 'worker', full_name || email.split('@')[0], phone || '', zone || 'Central', latitude ?? null, longitude ?? null],
   )
   const user = { id: userId, email, created_at: new Date().toISOString() }
   return { user: publicUser(user), profile: await getProfileByUserId(userId) }

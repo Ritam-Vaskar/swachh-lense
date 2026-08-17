@@ -163,28 +163,43 @@ function makeAuthApi() {
 			}
 		},
 		async signUp({ email, password, role, full_name, phone, zone, latitude, longitude }) {
-			const result = await request('/api/auth/signup', {
-				method: 'POST',
-				body: JSON.stringify({ email, password, role, full_name, phone, zone, latitude, longitude }),
-			})
-			return { data: result, error: null }
+			try {
+				const result = await request('/api/auth/signup', {
+					method: 'POST',
+					body: JSON.stringify({ email, password, role, full_name, phone, zone, latitude, longitude }),
+				})
+				const session = { user: result.user }
+				writeSession(session)
+				emitAuth('SIGNED_IN', session)
+				return { data: { user: result.user, profile: result.profile, session }, error: null }
+			} catch (error) {
+				return { data: null, error }
+			}
 		},
 		async ensureUser({ email, password, role, full_name, phone, zone, latitude, longitude, is_available }) {
-			const result = await request('/api/auth/ensure', {
-				method: 'POST',
-				body: JSON.stringify({ email, password, role, full_name, phone, zone, latitude, longitude, is_available }),
-			})
-			return { data: result, error: null }
+			try {
+				const result = await request('/api/auth/ensure', {
+					method: 'POST',
+					body: JSON.stringify({ email, password, role, full_name, phone, zone, latitude, longitude, is_available }),
+				})
+				return { data: result, error: null }
+			} catch (error) {
+				return { data: null, error }
+			}
 		},
 		async signInWithPassword({ email, password }) {
-			const result = await request('/api/auth/signin', {
-				method: 'POST',
-				body: JSON.stringify({ email, password }),
-			})
-			const session = { user: result.user }
-			writeSession(session)
-			emitAuth('SIGNED_IN', session)
-			return { data: { user: result.user, session }, error: null }
+			try {
+				const result = await request('/api/auth/signin', {
+					method: 'POST',
+					body: JSON.stringify({ email, password }),
+				})
+				const session = { user: result.user }
+				writeSession(session)
+				emitAuth('SIGNED_IN', session)
+				return { data: { user: result.user, session, profile: result.profile }, error: null }
+			} catch (error) {
+				return { data: null, error }
+			}
 		},
 		async signOut() {
 			writeSession(null)

@@ -53,17 +53,41 @@ export function AuthProvider({ children }) {
   }
 
   async function signUp({ email, password, role, full_name, phone, zone, latitude, longitude }) {
-    const { data, error } = await api.auth.signUp({ email, password, role, full_name, phone, zone, latitude, longitude })
-    if (error) return { error }
-    if (data.user) await ensureProfile(data.user, role, { full_name, phone, zone, latitude, longitude })
-    return { error: null }
+    try {
+      const { data, error } = await api.auth.signUp({ email, password, role, full_name, phone, zone, latitude, longitude })
+      if (error) return { error }
+      if (data?.user) {
+        setSession(data.session || { user: data.user })
+        if (data.profile) {
+          setProfile(data.profile)
+          setLoading(false)
+        } else {
+          await ensureProfile(data.user, role, { full_name, phone, zone, latitude, longitude })
+        }
+      }
+      return { error: null }
+    } catch (err) {
+      return { error: err }
+    }
   }
 
   async function signIn({ email, password }) {
-    const { data, error } = await api.auth.signInWithPassword({ email, password })
-    if (error) return { error }
-    if (data.user) await loadProfile(data.user.id)
-    return { error: null }
+    try {
+      const { data, error } = await api.auth.signInWithPassword({ email, password })
+      if (error) return { error }
+      if (data?.user) {
+        setSession(data.session || { user: data.user })
+        if (data.profile) {
+          setProfile(data.profile)
+          setLoading(false)
+        } else {
+          await loadProfile(data.user.id)
+        }
+      }
+      return { error: null }
+    } catch (err) {
+      return { error: err }
+    }
   }
 
   async function signOut() {

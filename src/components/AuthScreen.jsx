@@ -42,25 +42,34 @@ export default function AuthScreen({ onCitizen }) {
     e.preventDefault()
     setBusy(true)
     setError('')
-    if (mode === 'signin') {
-      const { error } = await signIn({ email: form.email, password: form.password })
-      if (error) setError(error.message.includes('Invalid login') ? 'Incorrect email or password.' : error.message)
-    } else {
-      if (!form.full_name.trim()) {
-        setError('Please enter your name.')
-        setBusy(false)
-        return
+    try {
+      if (mode === 'signin') {
+        const { error } = await signIn({ email: form.email, password: form.password })
+        if (error) {
+          const msg = error.message || String(error)
+          setError(msg.toLowerCase().includes('invalid') || msg.toLowerCase().includes('credential') ? 'Incorrect email or password.' : msg)
+        }
+      } else {
+        if (!form.full_name.trim()) {
+          setError('Please enter your name.')
+          return
+        }
+        const { error } = await signUp({
+          ...form,
+          role,
+          latitude: role === 'worker' ? (gps?.lat ?? null) : null,
+          longitude: role === 'worker' ? (gps?.lng ?? null) : null,
+        })
+        if (error) {
+          const msg = error.message || String(error)
+          setError(msg.toLowerCase().includes('already') ? 'An account with this email already exists.' : msg)
+        }
       }
-      const { error } = await signUp({
-        ...form,
-        role,
-        latitude: role === 'worker' ? (gps?.lat ?? null) : null,
-        longitude: role === 'worker' ? (gps?.lng ?? null) : null,
-      })
-      if (error) setError(error.message.includes('already') ? 'An account with this email already exists.' : error.message)
-      else setError('Account created! Try signing in now.')
+    } catch (err) {
+      setError(err.message || 'An unexpected error occurred. Please try again.')
+    } finally {
+      setBusy(false)
     }
-    setBusy(false)
   }
 
   return (

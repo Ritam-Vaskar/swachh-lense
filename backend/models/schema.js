@@ -61,141 +61,118 @@ export function makeId() {
   return crypto.randomUUID()
 }
 
+// -----------------------------------------------------------// ---------------------------------------------------------------------------
+// SCHEMA_STATEMENTS — creates all tables, migrations, and indexes idempotently
 // ---------------------------------------------------------------------------
-// SCHEMA_SQL — creates all tables and indexes idempotently
-// ---------------------------------------------------------------------------
-export const SCHEMA_SQL = `
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+export const SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS municipalities (
+    id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    name          text        NOT NULL,
+    slug          text        NOT NULL,
+    city          text        NOT NULL,
+    state         text        NOT NULL DEFAULT 'Unknown',
+    contact_email text,
+    lat_center    double precision,
+    lng_center    double precision,
+    zoom_default  integer     NOT NULL DEFAULT 12,
+    created_at    timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS municipalities_slug_key ON municipalities(slug)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS municipalities_name_key ON municipalities(name)`,
+  `CREATE TABLE IF NOT EXISTS app_users (
+    id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    email         text        NOT NULL UNIQUE,
+    password_hash text        NOT NULL,
+    created_at    timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS profiles (
+    id              uuid        PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE,
+    role            text        NOT NULL DEFAULT 'worker'
+                                CHECK (role IN ('operator', 'worker', 'superadmin')),
+    full_name       text        NOT NULL DEFAULT 'Team member',
+    phone           text        NOT NULL DEFAULT '',
+    zone            text        NOT NULL DEFAULT 'Central',
+    latitude        double precision,
+    longitude       double precision,
+    is_available    boolean     NOT NULL DEFAULT true,
+    municipality_id uuid        REFERENCES municipalities(id) ON DELETE SET NULL,
+    created_at      timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS swachhlens_reports (
+    id                 uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    reference_code     text        NOT NULL UNIQUE,
+    category           text        NOT NULL,
+    location           text        NOT NULL,
+    zone               text        NOT NULL DEFAULT 'Central',
+    reported_at        timestamptz NOT NULL DEFAULT now(),
+    status             text        NOT NULL DEFAULT 'New',
+    priority           text        NOT NULL DEFAULT 'Medium',
+    severity_score     integer     NOT NULL DEFAULT 50,
+    volume             text        NOT NULL DEFAULT 'Medium',
+    hazard_flag        boolean     NOT NULL DEFAULT false,
+    duplicate_count    integer     NOT NULL DEFAULT 1,
+    confidence         integer     NOT NULL DEFAULT 90,
+    description        text        NOT NULL DEFAULT '',
+    resident_name      text        NOT NULL DEFAULT 'Resident',
+    image_url          text,
+    citizen_update     text        NOT NULL DEFAULT 'Report received and queued for analysis.',
+    latitude           double precision,
+    longitude          double precision,
+    citizen_phone      text        NOT NULL DEFAULT '',
+    approval_status    text        NOT NULL DEFAULT 'Pending',
+    ai_analysis        jsonb,
+    team_size          integer     NOT NULL DEFAULT 1,
+    assigned_worker_id uuid        REFERENCES profiles(id) ON DELETE SET NULL,
+    municipality_id    uuid        REFERENCES municipalities(id) ON DELETE SET NULL,
+    municipality_name  text,
+    created_at         timestamptz NOT NULL DEFAULT now(),
+    updated_at         timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS swachhlens_tasks (
+    id               uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_id        uuid        NOT NULL REFERENCES swachhlens_reports(id) ON DELETE CASCADE,
+    task_code        text        NOT NULL UNIQUE,
+    crew_name        text        NOT NULL,
+    vehicle          text        NOT NULL,
+    scheduled_for    timestamptz NOT NULL DEFAULT now(),
+    eta              text        NOT NULL DEFAULT '30 min',
+    status           text        NOT NULL DEFAULT 'Assigned',
+    completion_score integer,
+    before_image_url text,
+    after_image_url  text,
+    worker_note      text        NOT NULL DEFAULT '',
+    escalated        boolean     NOT NULL DEFAULT false,
+    latitude         double precision,
+    longitude        double precision,
+    worker_id        uuid        REFERENCES profiles(id) ON DELETE SET NULL,
+    ai_rating        integer,
+    ai_feedback      text        NOT NULL DEFAULT '',
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    updated_at       timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS media_uploads (
+    id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    bucket     text        NOT NULL,
+    path       text        NOT NULL UNIQUE,
+    data_url   text        NOT NULL,
+    mime_type  text        NOT NULL,
+    size       bigint      NOT NULL DEFAULT 0,
+    name       text        NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `ALTER TABLE swachhlens_tasks ADD COLUMN IF NOT EXISTS ai_feedback text NOT NULL DEFAULT ''`,
+  `ALTER TABLE swachhlens_reports ADD COLUMN IF NOT EXISTS municipality_id uuid REFERENCES municipalities(id) ON DELETE SET NULL`,
+  `ALTER TABLE swachhlens_reports ADD COLUMN IF NOT EXISTS municipality_name text`,
+  `ALTER TABLE profiles ADD COLUMN IF NOT EXISTS municipality_id uuid REFERENCES municipalities(id) ON DELETE SET NULL`,
+  `CREATE INDEX IF NOT EXISTS swachhlens_reports_status_idx        ON swachhlens_reports(status)`,
+  `CREATE INDEX IF NOT EXISTS swachhlens_reports_priority_idx      ON swachhlens_reports(priority)`,
+  `CREATE INDEX IF NOT EXISTS swachhlens_reports_zone_idx          ON swachhlens_reports(zone)`,
+  `CREATE INDEX IF NOT EXISTS swachhlens_reports_approval_idx      ON swachhlens_reports(approval_status)`,
+  `CREATE INDEX IF NOT EXISTS swachhlens_reports_municipality_idx  ON swachhlens_reports(municipality_id)`,
+  `CREATE INDEX IF NOT EXISTS profiles_municipality_idx            ON profiles(municipality_id)`,
+  `CREATE INDEX IF NOT EXISTS swachhlens_tasks_report_id_idx       ON swachhlens_tasks(report_id)`,
+  `CREATE INDEX IF NOT EXISTS swachhlens_tasks_status_idx          ON swachhlens_tasks(status)`,
+  `CREATE INDEX IF NOT EXISTS swachhlens_tasks_worker_idx          ON swachhlens_tasks(worker_id)`,
+]
 
--- ─── municipalities ────────────────────────────────────────────────────────
--- One row per Urban Local Body (ULB). All reports and operator accounts are
--- scoped to a municipality via municipality_id. Auto-populated by
--- municipalityResolver.js when a citizen report arrives with GPS.
-CREATE TABLE IF NOT EXISTS municipalities (
-  id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  name          text        NOT NULL,
-  slug          text        NOT NULL,
-  city          text        NOT NULL,
-  state         text        NOT NULL DEFAULT 'Unknown',
-  contact_email text,
-  lat_center    double precision,
-  lng_center    double precision,
-  zoom_default  integer     NOT NULL DEFAULT 12,
-  created_at    timestamptz NOT NULL DEFAULT now()
-);
-
--- UNIQUE constraints via DO-block so they are safe on repeated runs
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'municipalities_slug_key') THEN
-    ALTER TABLE municipalities ADD CONSTRAINT municipalities_slug_key UNIQUE (slug);
-  END IF;
-END $$;
-
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'municipalities_name_key') THEN
-    ALTER TABLE municipalities ADD CONSTRAINT municipalities_name_key UNIQUE (name);
-  END IF;
-END $$;
-
--- ─── app_users ─────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS app_users (
-  id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  email         text        NOT NULL UNIQUE,
-  password_hash text        NOT NULL,
-  created_at    timestamptz NOT NULL DEFAULT now()
-);
-
--- ─── profiles ──────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS profiles (
-  id              uuid        PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE,
-  role            text        NOT NULL DEFAULT 'worker'
-                              CHECK (role IN ('operator', 'worker', 'superadmin')),
-  full_name       text        NOT NULL DEFAULT 'Team member',
-  phone           text        NOT NULL DEFAULT '',
-  zone            text        NOT NULL DEFAULT 'Central',
-  latitude        double precision,
-  longitude       double precision,
-  is_available    boolean     NOT NULL DEFAULT true,
-  municipality_id uuid        REFERENCES municipalities(id) ON DELETE SET NULL,
-  created_at      timestamptz NOT NULL DEFAULT now()
-);
-
--- ─── swachhlens_reports ────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS swachhlens_reports (
-  id                 uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  reference_code     text        NOT NULL UNIQUE,
-  category           text        NOT NULL,
-  location           text        NOT NULL,
-  zone               text        NOT NULL DEFAULT 'Central',
-  reported_at        timestamptz NOT NULL DEFAULT now(),
-  status             text        NOT NULL DEFAULT 'New',
-  priority           text        NOT NULL DEFAULT 'Medium',
-  severity_score     integer     NOT NULL DEFAULT 50,
-  volume             text        NOT NULL DEFAULT 'Medium',
-  hazard_flag        boolean     NOT NULL DEFAULT false,
-  duplicate_count    integer     NOT NULL DEFAULT 1,
-  confidence         integer     NOT NULL DEFAULT 90,
-  description        text        NOT NULL DEFAULT '',
-  resident_name      text        NOT NULL DEFAULT 'Resident',
-  image_url          text,
-  citizen_update     text        NOT NULL DEFAULT 'Report received and queued for analysis.',
-  latitude           double precision,
-  longitude          double precision,
-  citizen_phone      text        NOT NULL DEFAULT '',
-  approval_status    text        NOT NULL DEFAULT 'Pending',
-  ai_analysis        jsonb,
-  team_size          integer     NOT NULL DEFAULT 1,
-  assigned_worker_id uuid        REFERENCES profiles(id) ON DELETE SET NULL,
-  municipality_id    uuid        REFERENCES municipalities(id) ON DELETE SET NULL,
-  municipality_name  text,
-  created_at         timestamptz NOT NULL DEFAULT now(),
-  updated_at         timestamptz NOT NULL DEFAULT now()
-);
-
--- ─── swachhlens_tasks ──────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS swachhlens_tasks (
-  id               uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  report_id        uuid        NOT NULL REFERENCES swachhlens_reports(id) ON DELETE CASCADE,
-  task_code        text        NOT NULL UNIQUE,
-  crew_name        text        NOT NULL,
-  vehicle          text        NOT NULL,
-  scheduled_for    timestamptz NOT NULL DEFAULT now(),
-  eta              text        NOT NULL DEFAULT '30 min',
-  status           text        NOT NULL DEFAULT 'Assigned',
-  completion_score integer,
-  before_image_url text,
-  after_image_url  text,
-  worker_note      text        NOT NULL DEFAULT '',
-  escalated        boolean     NOT NULL DEFAULT false,
-  latitude         double precision,
-  longitude        double precision,
-  worker_id        uuid        REFERENCES profiles(id) ON DELETE SET NULL,
-  ai_rating        integer,
-  ai_feedback      text        NOT NULL DEFAULT '',
-  created_at       timestamptz NOT NULL DEFAULT now(),
-  updated_at       timestamptz NOT NULL DEFAULT now()
-);
-
--- ─── media_uploads ─────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS media_uploads (
-  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  bucket     text        NOT NULL,
-  path       text        NOT NULL UNIQUE,
-  data_url   text        NOT NULL,
-  mime_type  text        NOT NULL,
-  size       bigint      NOT NULL DEFAULT 0,
-  name       text        NOT NULL DEFAULT '',
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
--- ─── Indexes ───────────────────────────────────────────────────────────────
-CREATE INDEX IF NOT EXISTS swachhlens_reports_status_idx        ON swachhlens_reports(status);
-CREATE INDEX IF NOT EXISTS swachhlens_reports_priority_idx      ON swachhlens_reports(priority);
-CREATE INDEX IF NOT EXISTS swachhlens_reports_zone_idx          ON swachhlens_reports(zone);
-CREATE INDEX IF NOT EXISTS swachhlens_reports_approval_idx      ON swachhlens_reports(approval_status);
-CREATE INDEX IF NOT EXISTS swachhlens_reports_municipality_idx  ON swachhlens_reports(municipality_id);
-CREATE INDEX IF NOT EXISTS profiles_municipality_idx            ON profiles(municipality_id);
-CREATE INDEX IF NOT EXISTS swachhlens_tasks_report_id_idx       ON swachhlens_tasks(report_id);
-CREATE INDEX IF NOT EXISTS swachhlens_tasks_status_idx          ON swachhlens_tasks(status);
-CREATE INDEX IF NOT EXISTS swachhlens_tasks_worker_idx          ON swachhlens_tasks(worker_id);
-`
+export const SCHEMA_SQL = SCHEMA_STATEMENTS.join(';\n')

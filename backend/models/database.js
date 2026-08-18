@@ -1,14 +1,22 @@
 import crypto from 'node:crypto'
 import { Pool } from 'pg'
-import { DEMO_ACCOUNTS, SCHEMA_SQL, SAMPLE_TASKS, SEED_REPORTS, SEED_MUNICIPALITIES, makeId } from './schema.js'
+import { DEMO_ACCOUNTS, SCHEMA_STATEMENTS, SCHEMA_SQL, SAMPLE_TASKS, SEED_REPORTS, SEED_MUNICIPALITIES, makeId } from './schema.js'
 import { analyzeReport } from '../lib/ai.js'
 
-// const connectionString = process.env.DATABASE_URL || 'postgres://swachhlens:swachhlens@localhost:5432/swachhlens'
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
     rejectUnauthorized: false
-  }
+  },
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
+  connectionTimeoutMillis: 60000,
+  idleTimeoutMillis: 30000,
+  max: 10,
+});
+
+pool.on('error', (err) => {
+  console.warn('[PG Pool Warning]', err.message || err);
 });
 
 function hashPassword(password) {
@@ -82,31 +90,28 @@ function buildWhere(filters = []) {
   return { clause: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', params }
 }
 
-async function ensureSchema() {
-  await pool.query(SCHEMA_SQL)
-  // Run migrations for columns added after initial schema creation
-  const migrations = [
-    `ALTER TABLE swachhlens_tasks ADD COLUMN IF NOT EXISTS ai_feedback text NOT NULL DEFAULT ''`,
-    // Multi-tenant: add municipality columns to existing tables
-    `ALTER TABLE swachhlens_reports ADD COLUMN IF NOT EXISTS municipality_id uuid REFERENCES municipalities(id) ON DELETE SET NULL`,
-    `ALTER TABLE swachhlens_reports ADD COLUMN IF NOT EXISTS municipality_name text`,
-    `ALTER TABLE profiles ADD COLUMN IF NOT EXISTS municipality_id uuid REFERENCES municipalities(id) ON DELETE SET NULL`,
-    // Allow superadmin role (safe no-op if constraint already correct)
-    `ALTER TABLE profiles DROP CONSTRAINT IF EXISTS profiles_role_check`,
-    `ALTER TABLE profiles ADD CONSTRAINT profiles_role_check CHECK (role IN ('operator', 'worker', 'superadmin'))`,
-    // Municipality table indexes
-    `CREATE INDEX IF NOT EXISTS swachhlens_reports_municipality_idx ON swachhlens_reports(municipality_id)`,
-    `CREATE INDEX IF NOT EXISTS profiles_municipality_idx ON profiles(municipality_id)`,
-  ]
-  for (const sql of migrations) {
-    await pool.query(sql).catch((err) => {
-      // Ignore benign errors (column already exists, constraint already exists)
-      const msg = err.message || ''
-      if (!msg.includes('already exists') && !msg.includes('does not exist')) {
-        console.warn('[DB Migration]', msg)
+async function queryWithRetry(sql, params, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return params && params.length ? await pool.query(sql, params) : await pool.query(sql)
+    } catch (err) {
+      const isNetwork = err.code === 'ECONNRESET' || err.code === '57P01' || String(err.message || '').includes('ECONNRESET') || String(err.message || '').includes('timeout')
+      if (isNetwork && attempt < retries) {
+        await new Promise((r) => setTimeout(r, 1000 * attempt))
+        continue
       }
-    })
+      throw err
+    }
   }
+}
+
+async function ensureSchema() {
+  await queryWithRetry(SCHEMA_SQL).catch((err) => {
+    const msg = err.message || ''
+    if (!msg.includes('already exists')) {
+      console.warn('[DB Migration Warning]', msg)
+    }
+  })
 }
 
 async function selectRows({ table, columns = '*', filters = [], order, head = false }) {
@@ -269,21 +274,49 @@ export async function signInUser({ email, password }) {
   return { user: publicUser(user), profile: await getProfileByUserId(user.id) }
 }
 
-async function seedUsersIfNeeded() {
+async function seedMunicipalitiesIfNeeded() {
+  const muniMap = new Map()
+  for (const m of SEED_MUNICIPALITIES) {
+    const existing = await pool.query('SELECT * FROM municipalities WHERE slug = $1 LIMIT 1', [m.slug])
+    if (existing.rows[0]) {
+      muniMap.set(m.slug, existing.rows[0])
+    } else {
+      const id = makeId()
+      const { rows } = await pool.query(
+        `INSERT INTO municipalities (id, slug, name, city, state, contact_email, lat_center, lng_center, zoom_default)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+        [id, m.slug, m.name, m.city, m.state, m.contact_email, m.lat_center, m.lng_center, m.zoom_default],
+      )
+      muniMap.set(m.slug, rows[0])
+    }
+  }
+  return muniMap
+}
+
+async function seedUsersIfNeeded(muniMap = new Map()) {
   for (const account of DEMO_ACCOUNTS) {
-    await ensureUser(account).catch((err) => {
+    const muniSlug = account.email.startsWith('bbsr') ? 'bhubaneswar' : account.email.startsWith('kolkata') ? 'bhubaneswar' : 'bengaluru'
+    const muni = muniMap.get(muniSlug) || null
+    await ensureUser({ ...account, municipality_id: muni?.id || null }).catch((err) => {
       console.warn(`[SeedUsers] Note for ${account.email}:`, err.message)
     })
   }
 }
 
 export async function seedDatabaseIfNeeded() {
+  console.log('[Seed] Ensuring schema...')
   await ensureSchema()
+  console.log('[Seed] Schema ensured. Seeding municipalities...')
   const muniMap = await seedMunicipalitiesIfNeeded()
+  console.log('[Seed] Municipalities seeded. Seeding users...')
   await seedUsersIfNeeded(muniMap)
+  console.log('[Seed] Users seeded. Checking reports...')
 
   const { rows } = await pool.query('SELECT COUNT(*)::int AS count FROM swachhlens_reports')
-  if (rows[0]?.count > 0) return false
+  if (rows[0]?.count > 0) {
+    console.log('[Seed] Database already contains reports. Seeding skipped.')
+    return false
+  }
 
   const profileLookup = new Map()
   const { rows: profiles } = await pool.query('SELECT * FROM profiles')

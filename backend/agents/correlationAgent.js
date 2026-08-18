@@ -56,10 +56,11 @@ export async function runCorrelationAgent(reportId) {
       return markAsDuplicate(pool, target, parentReport, `${Math.round(minDistance)}m GPS match`)
     }
 
-    console.log(`[CorrelationAgent] No GPS duplicate found within 100m. Checking zone fallback...`)
+    console.log(`[CorrelationAgent] No GPS duplicate found within 100m. Report is spatially unique. Proceeding to priority planning.`)
+    return chainToPriorityAgent(reportId)
   }
 
-  // ─── PATH B: Zone + Category + Time-window fallback (no GPS, or GPS miss) ───
+  // ─── PATH B: Zone + Category + Time-window fallback (ONLY when report has no GPS) ───
   // Look for the same category in the same zone within the last 12 hours
   const { rows: zoneFallback } = await pool.query(
     `SELECT * FROM swachhlens_reports 

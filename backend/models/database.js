@@ -3,8 +3,13 @@ import { Pool } from 'pg'
 import { DEMO_ACCOUNTS, SCHEMA_SQL, SAMPLE_TASKS, SEED_REPORTS, SEED_MUNICIPALITIES, makeId } from './schema.js'
 import { analyzeReport } from '../lib/ai.js'
 
-const connectionString = process.env.DATABASE_URL || 'postgres://swachhlens:swachhlens@localhost:5432/swachhlens'
-const pool = new Pool({ connectionString })
+// const connectionString = process.env.DATABASE_URL || 'postgres://swachhlens:swachhlens@localhost:5432/swachhlens'
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex')
@@ -209,7 +214,7 @@ function publicUser(user) {
   return { id: user.id, email: user.email, created_at: user.created_at }
 }
 
-export async function signUpUser({ email, password, role, full_name, phone, zone, municipality_id = null }) {
+export async function signUpUser({ email, password, role, full_name, phone, zone, latitude, longitude }) {
   const existing = await pool.query('SELECT * FROM app_users WHERE email = $1 LIMIT 1', [email])
   if (existing.rows[0]) throw new Error('An account with this email already exists.')
 
@@ -217,8 +222,8 @@ export async function signUpUser({ email, password, role, full_name, phone, zone
   const userId = makeId()
   await pool.query('INSERT INTO app_users (id, email, password_hash) VALUES ($1, $2, $3)', [userId, email, password_hash])
   await pool.query(
-    'INSERT INTO profiles (id, role, full_name, phone, zone, is_available, municipality_id) VALUES ($1, $2, $3, $4, $5, true, $6)',
-    [userId, role || 'worker', full_name || email.split('@')[0], phone || '', zone || 'Central', municipality_id || null],
+    'INSERT INTO profiles (id, role, full_name, phone, zone, latitude, longitude, is_available) VALUES ($1, $2, $3, $4, $5, $6, $7, true)',
+    [userId, role || 'worker', full_name || email.split('@')[0], phone || '', zone || 'Central', latitude ?? null, longitude ?? null],
   )
   const user = { id: userId, email, created_at: new Date().toISOString() }
   return { user: publicUser(user), profile: await getProfileByUserId(userId) }
@@ -228,6 +233,18 @@ export async function ensureUser({ email, password, role, full_name, phone, zone
   const existing = await pool.query('SELECT * FROM app_users WHERE email = $1 LIMIT 1', [email])
   if (existing.rows[0]) {
     const user = existing.rows[0]
+    await pool.query(
+      `UPDATE profiles SET 
+         role = COALESCE($1, role), 
+         full_name = COALESCE($2, full_name), 
+         phone = COALESCE($3, phone), 
+         zone = COALESCE($4, zone), 
+         latitude = COALESCE($5, latitude), 
+         longitude = COALESCE($6, longitude), 
+         is_available = COALESCE($7, is_available) 
+       WHERE id = $8`,
+      [role, full_name, phone, zone, latitude, longitude, is_available, user.id],
+    )
     const profile = await getProfileByUserId(user.id)
     return { user: publicUser(user), profile }
   }
@@ -252,39 +269,11 @@ export async function signInUser({ email, password }) {
   return { user: publicUser(user), profile: await getProfileByUserId(user.id) }
 }
 
-/**
- * Seed the three starter municipalities (BBMP, BMC, PMC).
- * Uses ON CONFLICT DO NOTHING so it is safe to re-run.
- * Returns a Map of slug → municipality row for use by user seeding.
- */
-async function seedMunicipalitiesIfNeeded() {
-  const muniMap = new Map()
-  for (const m of SEED_MUNICIPALITIES) {
-    const { rows } = await pool.query(
-      `INSERT INTO municipalities (name, slug, city, state, lat_center, lng_center, zoom_default, contact_email)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (slug) DO UPDATE
-         SET name = EXCLUDED.name,
-             city = EXCLUDED.city,
-             state = EXCLUDED.state,
-             lat_center = EXCLUDED.lat_center,
-             lng_center = EXCLUDED.lng_center,
-             zoom_default = EXCLUDED.zoom_default
-       RETURNING *`,
-      [m.name, m.slug, m.city, m.state, m.lat_center, m.lng_center, m.zoom_default, m.contact_email || null]
-    )
-    if (rows[0]) muniMap.set(m.slug, rows[0])
-  }
-  return muniMap
-}
-
-async function seedUsersIfNeeded(muniMap) {
-  const { rows } = await pool.query('SELECT COUNT(*)::int AS count FROM app_users')
-  if (rows[0]?.count > 0) return
-
+async function seedUsersIfNeeded() {
   for (const account of DEMO_ACCOUNTS) {
-    const muniId = account.municipality ? muniMap.get(account.municipality)?.id || null : null
-    await signUpUser({ ...account, municipality_id: muniId }).catch(() => null)
+    await ensureUser(account).catch((err) => {
+      console.warn(`[SeedUsers] Note for ${account.email}:`, err.message)
+    })
   }
 }
 

@@ -4,10 +4,24 @@ import crypto from 'node:crypto'
 // Demo accounts — each tied to a municipality slug
 // ---------------------------------------------------------------------------
 export const DEMO_ACCOUNTS = [
-  { email: 'operator@swachhlens.local', password: 'Swachh123!', role: 'operator', full_name: 'Demo Operator', phone: '', zone: 'Central', municipality: 'bhubaneswar' },
-  { email: 'green@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Green Squad A', phone: '+91 90000 10001', zone: 'Central', latitude: 12.9783, longitude: 77.5921, municipality: 'bengaluru' },
-  { email: 'river@crew.local', password: 'Swachh123!', role: 'worker', full_name: 'River Crew B', phone: '+91 90000 10002', zone: 'Riverside', latitude: 12.9442, longitude: 77.5808, municipality: 'bengaluru' },
-  { email: 'bbsr@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Bhubaneswar Squad', phone: '+91 90000 10003', zone: 'Central', latitude: 20.3568, longitude: 85.8198, municipality: 'bhubaneswar' },
+  { email: 'operator@swachhlens.local', password: 'Swachh123!', role: 'operator', full_name: 'Demo Operator', phone: '+91 90000 00001', zone: 'Central' },
+  
+  // Kolkata Worker Groups (4 distinct GPS locations)
+  { email: 'kolkata.saltlake@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Kolkata Squad - Salt Lake', phone: '+91 98300 20001', zone: 'East', latitude: 22.5804, longitude: 88.4378 },
+  { email: 'kolkata.parkstreet@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Kolkata Squad - Park Street', phone: '+91 98300 20002', zone: 'Central', latitude: 22.5518, longitude: 88.3524 },
+  { email: 'kolkata.newtown@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Kolkata Squad - New Town', phone: '+91 98300 20003', zone: 'North', latitude: 22.5937, longitude: 88.4720 },
+  { email: 'kolkata.gariahat@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Kolkata Squad - Gariahat', phone: '+91 98300 20004', zone: 'South', latitude: 22.5195, longitude: 88.3653 },
+
+  // Bhubaneswar Worker Groups (4 distinct GPS locations)
+  { email: 'bbsr.patia@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Bhubaneswar Squad - Patia', phone: '+91 94370 30001', zone: 'North', latitude: 20.3588, longitude: 85.8160 },
+  { email: 'bbsr.saheednagar@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Bhubaneswar Squad - Saheed Nagar', phone: '+91 94370 30002', zone: 'Central', latitude: 20.2885, longitude: 85.8436 },
+  { email: 'bbsr.nayapalli@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Bhubaneswar Squad - Nayapalli', phone: '+91 94370 30003', zone: 'West', latitude: 20.3012, longitude: 85.8155 },
+  { email: 'bbsr.khandagiri@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Bhubaneswar Squad - Khandagiri', phone: '+91 94370 30004', zone: 'West', latitude: 20.2582, longitude: 85.7836 },
+
+  // Legacy Squads
+  { email: 'green@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Green Squad A', phone: '+91 90000 10001', zone: 'Central', latitude: 12.9783, longitude: 77.5921 },
+  { email: 'river@crew.local', password: 'Swachh123!', role: 'worker', full_name: 'River Crew B', phone: '+91 90000 10002', zone: 'Riverside', latitude: 12.9442, longitude: 77.5808 },
+  { email: 'bbsr@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Bhubaneswar Squad', phone: '+91 90000 10003', zone: 'Central', latitude: 20.3568, longitude: 85.8198 },
 ]
 
 // ---------------------------------------------------------------------------

@@ -52,13 +52,37 @@ export default function ReportDrawer({ report, onClose, onChanged, toast }) {
     if (message) toast(message, 'success')
   }
 
+  // ── Bug 1 Fix: await the approve endpoint (which now awaits dispatch),
+  //   then re-fetch fresh report + tasks so the drawer updates in-place.
   async function approveReport() {
     try {
       const res = await fetch(`http://localhost:3001/api/agents/approve/${report.id}`, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      toast('Report approved and dispatched.', 'success')
-      // The realtime subscription in App.jsx will automatically refresh the UI
+
+      // Re-fetch the fresh report (dispatch has now completed on the backend)
+      const { data: freshReport } = await api
+        .from('swachhlens_reports')
+        .select('*')
+        .eq('id', report.id)
+        .single()
+
+      // Re-fetch newly created tasks
+      const { data: freshTasks } = await api
+        .from('swachhlens_tasks')
+        .select('*, worker:profiles(*)')
+        .eq('report_id', report.id)
+        .order('created_at', { ascending: false })
+
+      if (freshReport) {
+        // Update parent list + keep drawer open with fresh data
+        onChanged({ ...report, ...freshReport })
+      }
+      if (freshTasks) {
+        setTasks(freshTasks)
+      }
+
+      toast('Report approved and dispatched. Worker notified!', 'success')
     } catch (err) {
       toast(err.message || 'Failed to approve report', 'error')
     }
@@ -130,19 +154,43 @@ export default function ReportDrawer({ report, onClose, onChanged, toast }) {
     await updateReport({ status: next, citizen_update: updates[next] || report.citizen_update }, `Report moved to ${next}.`)
   }
 
+  // ── Bug 3 Fix: call onChanged with the merged closed report BEFORE closing
+  //   the drawer so the parent table row updates to 'Closed' immediately.
   async function verifyClose() {
     setVerifying(true)
-    await updateReport(
-      { status: 'Closed', approval_status: 'Approved', citizen_update: 'Report verified and closed by operator. Thank you for helping keep the city clean.' },
-      null, // suppress generic toast — we show the success overlay instead
-    )
+
+    const closedPatch = {
+      status: 'Closed',
+      approval_status: 'Approved',
+      citizen_update: 'Report verified and closed by operator. Thank you for helping keep the city clean.',
+    }
+
+    const { data: updatedReport, error } = await api
+      .from('swachhlens_reports')
+      .update({ ...closedPatch, updated_at: new Date().toISOString() })
+      .eq('id', report.id)
+      .select()
+      .single()
+
+    if (error) {
+      toast('Could not close the report.', 'error')
+      setVerifying(false)
+      return
+    }
+
     if (tasks[0]) {
       await api.from('swachhlens_tasks').update({ status: 'Verified', updated_at: new Date().toISOString() }).eq('id', tasks[0].id)
       setTasks((t) => t.map((x) => (x.id === tasks[0].id ? { ...x, status: 'Verified' } : x)))
     }
+
+    // Update parent list IMMEDIATELY so the table row shows 'Closed' without a refresh
+    onChanged({ ...report, ...updatedReport })
+
     setVerifying(false)
     setShowVerified(true)
-    // Auto-close the drawer after showing the success state
+    toast('Report verified and closed.', 'success')
+
+    // Auto-close the drawer
     setTimeout(() => {
       setShowVerified(false)
       onClose()
@@ -467,7 +515,8 @@ export default function ReportDrawer({ report, onClose, onChanged, toast }) {
               <Icon name="Zap" size={16} /> {assigning ? 'Assigning…' : 'Auto-assign worker'}
             </button>
           )}
-          {canAdvance && !canVerify && canApprove === false && tasks.length > 0 && (
+          {/* ── Bug 2 Fix: use approval_status check instead of fragile canApprove===false ── */}
+          {canAdvance && !canVerify && report.approval_status !== 'Pending' && tasks.length > 0 && (
             <button className="btn btn-primary" onClick={advanceStatus}>
               <Icon name="ArrowRightCircle" size={16} /> Advance to {STATUS_FLOW[STATUS_FLOW.indexOf(report.status) + 1]}
             </button>

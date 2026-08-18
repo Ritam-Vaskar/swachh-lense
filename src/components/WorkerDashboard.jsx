@@ -133,54 +133,73 @@ function VerificationModal({ result, beforeUrl, afterUrl, onRetry, onConfirm, su
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function WorkerDashboard({ onSignOut }) {
-  const { profile, signOut } = useAuth()
+  const { profile, signOut, updateLocation } = useAuth()
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
   const [toast, setToast] = useState(null)
   const [view, setView] = useState('list')
   const [navTask, setNavTask] = useState(null)
+  const [gpsStatus, setGpsStatus] = useState('detecting')
+  const [gpsAccuracy, setGpsAccuracy] = useState(null)
 
   function showToast(message, type = 'info') {
     setToast({ message, type })
     setTimeout(() => setToast(null), 3500)
   }
 
+  const profileId = profile?.id
+  const hasLocatedRef = useRef(false)
+
   const loadTasks = useCallback(async () => {
-    if (!profile) return
+    if (!profileId) return
     setLoading(true)
     const { data } = await api
       .from('swachhlens_tasks')
       .select('*, report:swachhlens_reports(*)')
-      .eq('worker_id', profile.id)
+      .eq('worker_id', profileId)
       .order('created_at', { ascending: false })
     setTasks(data || [])
     setLoading(false)
-  }, [profile])
+  }, [profileId])
 
   useEffect(() => {
+    if (!profileId) return
     loadTasks()
     const sub = api
       .channel('worker-tasks')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'swachhlens_tasks', filter: `worker_id=eq.${profile?.id}` }, () => loadTasks())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'swachhlens_tasks', filter: `worker_id=eq.${profileId}` }, () => loadTasks())
       .subscribe()
     return () => api.removeChannel(sub)
-  }, [loadTasks, profile])
+  }, [loadTasks, profileId])
 
-  // Live GPS tracking
-  useEffect(() => {
-    if (!profile) return
-    if (navigator.geolocation) {
-      const watcher = navigator.geolocation.watchPosition(
-        (pos) => {
-          api.from('profiles').update({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }).eq('id', profile.id).then(() => {})
-        },
-        () => {},
-        { enableHighAccuracy: true, maximumAge: 30000 },
-      )
-      return () => navigator.geolocation.clearWatch(watcher)
+  // Fetch device GPS location ONCE on login/mount
+  const syncGps = useCallback(() => {
+    if (!navigator.geolocation) {
+      setGpsStatus('unsupported')
+      return
     }
-  }, [profile])
+    setGpsStatus('detecting')
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords
+        updateLocation(latitude, longitude)
+        setGpsAccuracy(Math.round(accuracy))
+        setGpsStatus('live')
+      },
+      (err) => {
+        console.warn('[WorkerDashboard] GPS position unavailable:', err?.message || err)
+        setGpsStatus('denied')
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 },
+    )
+  }, [updateLocation])
+
+  useEffect(() => {
+    if (!profileId || hasLocatedRef.current) return
+    hasLocatedRef.current = true
+    syncGps()
+  }, [profileId, syncGps])
 
   async function updateTaskStatus(task, status) {
     const { error } = await api.from('swachhlens_tasks').update({ status, updated_at: new Date().toISOString() }).eq('id', task.id)
@@ -224,6 +243,20 @@ export default function WorkerDashboard({ onSignOut }) {
         <div className="worker-header-info">
           <span className="worker-name"><Icon name="User" size={15} /> {profile?.full_name}</span>
           <span className="tag">{profile?.zone} zone</span>
+          <button
+            type="button"
+            className={`live-pill ${gpsStatus === 'live' ? '' : 'busy'}`}
+            style={{ cursor: 'pointer', border: 'none' }}
+            onClick={syncGps}
+            title={gpsStatus === 'live' ? `Live GPS Active: ${profile?.latitude?.toFixed(4)}, ${profile?.longitude?.toFixed(4)} (±${gpsAccuracy || 10}m). Click to re-sync.` : 'Click to acquire live GPS'}
+          >
+            <span className="live-dot" style={{ background: gpsStatus === 'live' ? '#16a34a' : '#f59e0b' }} />
+            {gpsStatus === 'live' && profile?.latitude != null
+              ? `GPS: ${profile.latitude.toFixed(3)}, ${profile.longitude?.toFixed(3)}`
+              : gpsStatus === 'detecting'
+              ? 'Locating…'
+              : 'GPS Offline'}
+          </button>
           <span className={`live-pill ${profile?.is_available ? '' : 'busy'}`}>
             <span className="live-dot" style={{ background: profile?.is_available ? '#16a34a' : '#94a3b8' }} />
             {profile?.is_available ? 'Available' : 'Busy'}
@@ -312,6 +345,7 @@ export default function WorkerDashboard({ onSignOut }) {
           workerProfile={profile}
           onClose={() => setNavTask(null)}
           onArrivedOnSite={handleArrivedOnSite}
+          onGpsUpdate={updateLocation}
         />
       )}
 

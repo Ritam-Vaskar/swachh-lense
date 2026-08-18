@@ -51,24 +51,74 @@ export function AuthProvider({ children }) {
       full_name: extra.full_name || user.email?.split('@')[0] || 'Team member',
       phone: extra.phone || '',
       zone: extra.zone || 'Central',
-      municipality_id: extra.municipality_id || null,
+      latitude: extra.latitude ?? null,
+      longitude: extra.longitude ?? null,
     }
     const { data } = await api.from('profiles').insert(row).select().single()
     setProfile(data)
   }
 
-  async function signUp({ email, password, role, full_name, phone, zone, municipality_id }) {
-    const { data, error } = await api.auth.signUp({ email, password, role, full_name, phone, zone, municipality_id })
-    if (error) return { error }
-    if (data.user) await ensureProfile(data.user, role, { full_name, phone, zone, municipality_id })
-    return { error: null }
+  async function signUp({ email, password, role, full_name, phone, zone, latitude, longitude }) {
+    try {
+      const { data, error } = await api.auth.signUp({ email, password, role, full_name, phone, zone, latitude, longitude })
+      if (error) return { error }
+      if (data?.user) {
+        setSession(data.session || { user: data.user })
+        if (data.profile) {
+          setProfile(data.profile)
+          setLoading(false)
+        } else {
+          await ensureProfile(data.user, role, { full_name, phone, zone, latitude, longitude })
+        }
+      }
+      return { error: null }
+    } catch (err) {
+      return { error: err }
+    }
   }
 
   async function signIn({ email, password }) {
-    const { data, error } = await api.auth.signInWithPassword({ email, password })
-    if (error) return { error }
-    if (data.user) await loadProfile(data.user.id)
-    return { error: null }
+    try {
+      const { data, error } = await api.auth.signInWithPassword({ email, password })
+      if (error) return { error }
+      if (data?.user) {
+        setSession(data.session || { user: data.user })
+        if (data.profile) {
+          setProfile(data.profile)
+          setLoading(false)
+        } else {
+          await loadProfile(data.user.id)
+        }
+      }
+      return { error: null }
+    } catch (err) {
+      return { error: err }
+    }
+  }
+
+  async function updateLocation(latitude, longitude) {
+    if (!session?.user?.id) return
+    const lat = typeof latitude === 'number' ? latitude : parseFloat(latitude)
+    const lng = typeof longitude === 'number' ? longitude : parseFloat(longitude)
+    if (isNaN(lat) || isNaN(lng)) return
+
+    // Guard: ignore if coordinates have not changed noticeably (< ~10 meters)
+    if (
+      profile &&
+      profile.latitude != null &&
+      profile.longitude != null &&
+      Math.abs(profile.latitude - lat) < 0.0001 &&
+      Math.abs(profile.longitude - lng) < 0.0001
+    ) {
+      return
+    }
+
+    try {
+      await api.from('profiles').update({ latitude: lat, longitude: lng }).eq('id', session.user.id)
+      setProfile((prev) => (prev ? { ...prev, latitude: lat, longitude: lng } : prev))
+    } catch (err) {
+      console.warn('[useAuth] updateLocation error:', err)
+    }
   }
 
   async function signOut() {
@@ -77,10 +127,7 @@ export function AuthProvider({ children }) {
     setProfile(null)
   }
 
-  // Derived convenience value — undefined-safe
-  const municipalityId = profile?.municipality_id ?? null
-
-  const value = { session, profile, loading, municipalityId, signIn, signUp, signOut, ensureProfile, refreshProfile }
+  const value = { session, profile, loading, signIn, signUp, signOut, ensureProfile, updateLocation }
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

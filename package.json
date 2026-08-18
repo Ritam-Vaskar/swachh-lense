@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "server": "node backend/server.js",
+    "seed:workers": "node backend/scripts/seed_workers.js",
     "dev:full": "concurrently \"npm run server\" \"npm run dev\"",
     "build": "vite build",
     "lint": "eslint .",

@@ -50,25 +50,35 @@ export async function runDispatchAgent(reportId) {
   }
 
   // 3. Score each worker
-  // Priority: same zone > nearest by GPS > any available
+  // Priority: Proximity (nearest by GPS) > Zone match fallback > Any available
+  const hasReportGps = report.latitude != null && report.longitude != null
+
   const scored = workers.map(w => {
     let score = 0
-    if (w.zone === report.zone) score += 100          // same zone bonus
-    if (w.latitude && w.longitude && report.latitude && report.longitude) {
-      const dist = getDistance(report.latitude, report.longitude, w.latitude, w.longitude)
-      score += Math.max(0, 50 - dist / 1000)          // closer = higher score (up to 50pts per km)
+    let distKm = null
+
+    if (hasReportGps && w.latitude != null && w.longitude != null) {
+      const distMeters = getDistance(report.latitude, report.longitude, w.latitude, w.longitude)
+      distKm = distMeters / 1000
+      // Proximity-first: closest worker gets highest score. Zone match gives a minor tie-breaker boost.
+      score = 100000 / (1 + distKm) + (w.zone === report.zone ? 5 : 0)
+    } else if (w.zone === report.zone) {
+      score = hasReportGps ? 50 : 100 // fallback zone score
+    } else {
+      score = 10
     }
-    return { worker: w, score }
+
+    return { worker: w, score, distKm }
   })
 
   scored.sort((a, b) => b.score - a.score)
-  const best = scored[0].worker
+  const bestMatch = scored[0]
+  const best = bestMatch.worker
 
-  // 4. ETA estimate (simple heuristic based on distance or fallback)
+  // 4. ETA estimate based on physical distance or fallback
   let etaMin = 30
-  if (best.latitude && report.latitude) {
-    const dist = getDistance(report.latitude, report.longitude, best.latitude, best.longitude) / 1000
-    etaMin = Math.max(10, Math.round(dist * 6)) // ~10 km/h avg urban speed
+  if (bestMatch.distKm != null) {
+    etaMin = Math.max(5, Math.round(bestMatch.distKm * 4)) // ~15 km/h avg response speed
   }
 
   // 5. Create a task record

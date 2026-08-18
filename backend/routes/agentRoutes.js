@@ -126,7 +126,7 @@ router.post('/approve/:reportId', async (req, res) => {
     )
     if (tasks.length === 0) {
       const { runDispatchAgent } = await import('../agents/dispatchAgent.js')
-      setImmediate(() => runDispatchAgent(reportId))
+      await runDispatchAgent(reportId)
     }
 
     res.json({ success: true, ...result })

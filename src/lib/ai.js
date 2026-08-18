@@ -25,7 +25,7 @@ export function findNearestWorker(workers, lat, lng) {
   let bestDist = Infinity
   for (const w of available) {
     if (w.latitude == null || w.longitude == null) continue
-    const d = Math.sqrt(Math.pow(w.latitude - lat, 2) + Math.pow(w.longitude - lng, 2))
+    const d = haversineKm(lat, lng, w.latitude, w.longitude)
     if (d < bestDist) {
       bestDist = d
       best = w

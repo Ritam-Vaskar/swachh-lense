@@ -127,7 +127,8 @@ export function AuthProvider({ children }) {
     setProfile(null)
   }
 
-  const value = { session, profile, loading, signIn, signUp, signOut, ensureProfile, updateLocation }
+  const municipalityId = profile?.municipality_id ?? null
+  const value = { session, profile, loading, municipalityId, signIn, signUp, signOut, ensureProfile, updateLocation, refreshProfile }
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

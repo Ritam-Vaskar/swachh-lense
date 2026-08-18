@@ -29,32 +29,40 @@ router.post('/intake', async (req, res) => {
     const result = await runIntakeAgent(req.body || {})
     if (!result.success) return res.status(400).json({ error: result.error })
 
-    // Respond to the citizen immediately — municipality lookup is fire-and-forget
-    res.status(201).json(result)
-
-    // Background: resolve municipality from GPS and patch the report row
     const { report } = result
+
+    // Attempt to resolve municipality BEFORE responding, but cap at 3 seconds
+    // so Nominatim lag never blocks the citizen-facing response.
     if (report?.id && report?.latitude != null && report?.longitude != null) {
-      setImmediate(async () => {
-        try {
-          const muni = await resolveMunicipality(report.latitude, report.longitude)
-          if (muni) {
-            const { getPool } = await import('../models/database.js')
-            const pool = getPool()
-            await pool.query(
-              `UPDATE swachhlens_reports
-               SET municipality_id = $1, municipality_name = $2, updated_at = now()
-               WHERE id = $3 AND municipality_id IS NULL`,
-              [muni.id, muni.name, report.id]
-            )
-            console.info(`[Route /intake] Report ${report.id} → municipality "${muni.name}" (${muni.slug})`)
-          }
-        } catch (err) {
-          // Never crash the server over a background geocode failure
-          console.error('[Route /intake] Municipality resolution error:', err.message)
+      try {
+        const timeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Municipality resolution timed out')), 3000)
+        )
+        const muni = await Promise.race([
+          resolveMunicipality(report.latitude, report.longitude),
+          timeout,
+        ])
+        if (muni) {
+          const { getPool } = await import('../models/database.js')
+          const pool = getPool()
+          await pool.query(
+            `UPDATE swachhlens_reports
+             SET municipality_id = $1, municipality_name = $2, updated_at = now()
+             WHERE id = $3 AND municipality_id IS NULL`,
+            [muni.id, muni.name, report.id]
+          )
+          // Patch the result object so the response includes municipality info
+          report.municipality_id   = muni.id
+          report.municipality_name = muni.name
+          console.info(`[Route /intake] Report ${report.id} → municipality "${muni.name}" (${muni.slug})`)
         }
-      })
+      } catch (err) {
+        // Timeout or geocode failure — report is saved, backfill job will catch it later
+        console.warn(`[Route /intake] Municipality resolution skipped: ${err.message}`)
+      }
     }
+
+    res.status(201).json(result)
   } catch (err) {
     console.error('[Route /agents/intake]', err)
     res.status(500).json({ error: 'Intake agent encountered an unexpected error.' })

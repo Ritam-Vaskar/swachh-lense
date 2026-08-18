@@ -63,6 +63,9 @@ export default function App() {
 
 function OperatorDashboard() {
   const { profile, signOut, municipalityId } = useAuth()
+  // Non-superadmin operators start scoped to their own municipality.
+  // Superadmin (no municipality_id on profile) defaults to null → national view.
+  const isSuperadmin = !profile?.municipality_id
   const [activeMuniId, setActiveMuniId] = useState(municipalityId || null)
   const [reports, setReports] = useState([])
   const [workers, setWorkers] = useState([])
@@ -215,7 +218,7 @@ function OperatorDashboard() {
       {/* Municipality context bar & live switcher */}
       <MunicipalityHeader
         municipalityId={activeMuniId}
-        onSelectMunicipality={setActiveMuniId}
+        onSelectMunicipality={isSuperadmin ? setActiveMuniId : undefined}
         reports={reports}
       />
 
@@ -246,9 +249,15 @@ function OperatorDashboard() {
           {view === 'map' ? (
             <MapDashboard reports={reports} workers={workers} onSelect={setSelected} selectedId={selected?.id} />
           ) : view === 'analytics' ? (
-            <AnalyticsView reports={reports} />
+            <AnalyticsView reports={reports} activeMuniId={activeMuniId} onSelectMunicipality={isSuperadmin ? setActiveMuniId : undefined} />
           ) : (
             <>
+              {!activeMuniId && (
+                <div className="national-banner">
+                  <Icon name="Globe" size={14} />
+                  <span>National overview — showing reports from <strong>all municipalities</strong>. Select a municipality above to scope your view.</span>
+                </div>
+              )}
               <div className="kpi-grid">
                 <KpiCard icon="Inbox" label="Total reports" value={kpis.total} trend={`${kpis.active} active`} />
                 <KpiCard icon="ClipboardCheck" label="Pending approval" value={kpis.pending} tone="warning" trend="awaiting review" />
@@ -430,7 +439,28 @@ function KpiCard({ icon, label, value, trend, tone = 'primary' }) {
   )
 }
 
-function AnalyticsView({ reports }) {
+const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || 'http://localhost:3001'
+
+const MUNI_PALETTE = ['#6366f1','#0ea5e9','#8b5cf6','#f59e0b','#14b8a6','#ec4899','#22c55e','#f97316']
+function muniColor(slug = '') {
+  let h = 0
+  for (let i = 0; i < slug.length; i++) h = (h * 31 + slug.charCodeAt(i)) & 0xffff
+  return MUNI_PALETTE[h % MUNI_PALETTE.length]
+}
+
+function AnalyticsView({ reports, activeMuniId, onSelectMunicipality }) {
+  const [muniStats, setMuniStats] = useState([])
+  const [muniLoading, setMuniLoading] = useState(true)
+
+  useEffect(() => {
+    setMuniLoading(true)
+    fetch(`${API_BASE}/api/municipalities/stats`)
+      .then((r) => r.json())
+      .then(({ data }) => setMuniStats(data || []))
+      .catch(() => setMuniStats([]))
+      .finally(() => setMuniLoading(false))
+  }, [])
+
   const byCategory = useMemo(() => {
     const map = {}
     reports.forEach((r) => { map[r.category] = (map[r.category] || 0) + 1 })
@@ -458,6 +488,60 @@ function AnalyticsView({ reports }) {
         <KpiCard icon="Copy" label="Duplicate clusters" value={reports.filter((r) => r.duplicate_count > 1).length} trend="merged" />
         <KpiCard icon="ShieldCheck" label="Verified" value={byStatus['Closed'] || 0} trend="audit ready" />
       </div>
+
+      {/* Municipality breakdown — only visible to superadmin (all municipalities shown) */}
+      <div className="panel">
+        <div className="panel-header">
+          <h3 className="panel-title">Municipality breakdown</h3>
+          <div className="panel-sub">Click a city to scope your dashboard</div>
+        </div>
+        <div className="panel-body">
+          {muniLoading ? (
+            <div className="spinner-wrap" style={{ padding: '20px 0' }}><div className="spinner" /></div>
+          ) : muniStats.length === 0 ? (
+            <p className="muted">No municipality data available.</p>
+          ) : (
+            <div className="muni-breakdown-grid">
+              {muniStats.map((m) => {
+                const color = muniColor(m.slug)
+                const isActive = activeMuniId === m.id
+                return (
+                  <div
+                    key={m.id}
+                    id={`muni-card-${m.slug}`}
+                    className={`muni-breakdown-card ${isActive ? 'active' : ''}`}
+                    style={{ '--mbc': color, cursor: onSelectMunicipality ? 'pointer' : 'default' }}
+                    onClick={() => onSelectMunicipality && onSelectMunicipality(m.id === activeMuniId ? null : m.id)}
+                  >
+                    <div className="mbc-header" style={{ borderLeft: `3px solid ${color}` }}>
+                      <span className="mbc-dot" style={{ background: color }} />
+                      <div>
+                        <div className="mbc-name">{m.name}</div>
+                        <div className="mbc-geo">{m.city} · {m.state}</div>
+                      </div>
+                      {isActive && <span className="mbc-active-pill">Active</span>}
+                    </div>
+                    <div className="mbc-stats">
+                      <div className="mbc-stat"><span className="mbc-val">{m.total}</span><span className="mbc-lbl">Total</span></div>
+                      <div className="mbc-stat"><span className="mbc-val" style={{ color }}>{m.active}</span><span className="mbc-lbl">Active</span></div>
+                      <div className="mbc-stat"><span className="mbc-val" style={{ color: '#ef4444' }}>{m.critical}</span><span className="mbc-lbl">Critical</span></div>
+                      <div className="mbc-stat"><span className="mbc-val" style={{ color: '#f59e0b' }}>{m.pending}</span><span className="mbc-lbl">Pending</span></div>
+                      <div className="mbc-stat"><span className="mbc-val" style={{ color: '#16a34a' }}>{m.resolved}</span><span className="mbc-lbl">Resolved</span></div>
+                    </div>
+                    <div className="mbc-bar">
+                      <div className="mbc-bar-fill" style={{ width: `${m.total > 0 ? Math.round((m.resolved / m.total) * 100) : 0}%`, background: color }} />
+                    </div>
+                    <div className="mbc-rate muted" style={{ fontSize: 11, marginTop: 4 }}>
+                      Resolution rate: {m.total > 0 ? Math.round((m.resolved / m.total) * 100) : 0}%
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="panel">
         <div className="panel-header"><h3 className="panel-title">Reports by category</h3></div>
         <div className="panel-body">

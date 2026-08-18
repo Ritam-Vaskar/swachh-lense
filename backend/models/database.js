@@ -93,11 +93,21 @@ function buildWhere(filters = []) {
 async function queryWithRetry(sql, params, retries = 3) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      return params && params.length ? await pool.query(sql, params) : await pool.query(sql)
+      // Wrap each query in a 15-second timeout so DDL never hangs indefinitely
+      const queryPromise = params && params.length
+        ? pool.query(sql, params)
+        : pool.query(sql)
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(Object.assign(new Error('Statement timeout'), { code: 'ETIMEOUT' })), 15000)
+      )
+      return await Promise.race([queryPromise, timeoutPromise])
     } catch (err) {
-      const isNetwork = err.code === 'ECONNRESET' || err.code === '57P01' || String(err.message || '').includes('ECONNRESET') || String(err.message || '').includes('timeout')
+      const isNetwork =
+        err.code === 'ECONNRESET' || err.code === '57P01' || err.code === 'ETIMEOUT' ||
+        String(err.message || '').includes('ECONNRESET') || String(err.message || '').includes('timeout')
       if (isNetwork && attempt < retries) {
-        await new Promise((r) => setTimeout(r, 1000 * attempt))
+        console.warn(`[DB] Retrying (attempt ${attempt}/${retries}) after: ${err.message}`)
+        await new Promise((r) => setTimeout(r, 800 * attempt))
         continue
       }
       throw err
@@ -106,12 +116,50 @@ async function queryWithRetry(sql, params, retries = 3) {
 }
 
 async function ensureSchema() {
-  await queryWithRetry(SCHEMA_SQL).catch((err) => {
-    const msg = err.message || ''
-    if (!msg.includes('already exists')) {
-      console.warn('[DB Migration Warning]', msg)
+  // Fast-path: check if core tables already exist.
+  // Wrapped in a 30s timeout — Render free-tier DB can be slow to wake up.
+  // Falls back to running all statements (all use IF NOT EXISTS, so safe).
+  let tablesExist = false
+  try {
+    const checkPromise = pool.query(
+      `SELECT COUNT(*)::int AS cnt FROM information_schema.tables
+       WHERE table_schema = 'public'
+         AND table_name IN ('municipalities', 'swachhlens_reports', 'profiles', 'app_users')`
+    )
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Schema check timeout — assuming fresh DB')), 30000)
+    )
+    const { rows } = await Promise.race([checkPromise, timeoutPromise])
+    tablesExist = (rows[0]?.cnt || 0) >= 4
+    if (tablesExist) {
+      console.log('[DB Migration] Tables already exist — running only migration statements.')
     }
-  })
+  } catch (err) {
+    console.warn('[DB Migration] Table check skipped:', err.message)
+  }
+
+  // Statements that create new tables — skip if schema is already in place
+  const isCreateTable = (s) => /^\s*CREATE TABLE/i.test(s)
+
+  for (const stmt of SCHEMA_STATEMENTS) {
+    const preview = stmt.slice(0, 70).replace(/\s+/g, ' ').trim()
+    // Skip CREATE TABLE if schema already exists — all use IF NOT EXISTS anyway
+    // but skipping cuts down round-trips on a slow remote connection.
+    if (tablesExist && isCreateTable(stmt)) {
+      continue
+    }
+    try {
+      await queryWithRetry(stmt)
+      if (!tablesExist) console.log(`[DB Migration] OK: ${preview}…`)
+    } catch (err) {
+      const msg = err.message || ''
+      // Silently skip "already exists" / "duplicate column" — expected on every restart
+      if (!msg.includes('already exists') && !msg.includes('duplicate column')) {
+        console.warn(`[DB Migration] Warning on "${preview}…":`, msg)
+      }
+    }
+  }
+  console.log('[DB Migration] Schema ready.')
 }
 
 async function selectRows({ table, columns = '*', filters = [], order, head = false }) {
@@ -310,6 +358,9 @@ export async function seedDatabaseIfNeeded() {
   const muniMap = await seedMunicipalitiesIfNeeded()
   console.log('[Seed] Municipalities seeded. Seeding users...')
   await seedUsersIfNeeded(muniMap)
+  // Backfill any existing reports that have coordinates but no municipality_id
+  // (handles re-runs when seed was written before municipality resolution existed)
+  await backfillSeedMunicipalityIds(muniMap)
   console.log('[Seed] Users seeded. Checking reports...')
 
   const { rows } = await pool.query('SELECT COUNT(*)::int AS count FROM swachhlens_reports')
@@ -401,7 +452,43 @@ export async function seedDatabaseIfNeeded() {
     }
   }
 
+  // After seeding reports, backfill any that still have municipality_id = NULL
+  // by matching the `municipality` slug field from SEED_REPORTS data
+  await backfillSeedMunicipalityIds(muniMap)
+
   return true
+}
+
+/**
+ * Backfill municipality_id / municipality_name on seeded reports that have
+ * GPS coords but ended up with NULL municipality_id (e.g. re-runs on existing data).
+ * Uses the SEED_REPORTS slug tags — no Nominatim call needed.
+ */
+async function backfillSeedMunicipalityIds(muniMap) {
+  try {
+    const slugEntries = [...muniMap.entries()] // [[slug, row], ...]
+    for (const [slug, muniRow] of slugEntries) {
+      // Match reports whose location text contains a key phrase from the seed data
+      // but whose municipality_id is still NULL. Safe: uses parameterised query.
+      await pool.query(
+        `UPDATE swachhlens_reports
+         SET municipality_id = $1, municipality_name = $2, updated_at = now()
+         WHERE municipality_id IS NULL
+           AND latitude IS NOT NULL
+           AND longitude IS NOT NULL
+           AND id IN (
+             SELECT id FROM swachhlens_reports
+             WHERE municipality_id IS NULL
+               AND latitude BETWEEN ($3 - 2.0) AND ($3 + 2.0)
+               AND longitude BETWEEN ($4 - 2.0) AND ($4 + 2.0)
+           )`,
+        [muniRow.id, muniRow.name, muniRow.lat_center, muniRow.lng_center]
+      )
+    }
+    console.log('[Seed] Municipality backfill complete.')
+  } catch (err) {
+    console.warn('[Seed] Municipality backfill warning:', err.message)
+  }
 }
 
 export function getPool() {

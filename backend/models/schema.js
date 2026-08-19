@@ -31,6 +31,7 @@ export const SEED_MUNICIPALITIES = [
   { slug: 'bengaluru',    name: 'Bengaluru',    city: 'Bengaluru',    state: 'Karnataka',    lat_center: 12.9716, lng_center: 77.5946, zoom_default: 12, contact_email: 'swachh@bbmp.gov.in' },
   { slug: 'bhubaneswar', name: 'Bhubaneswar', city: 'Bhubaneswar', state: 'Odisha',         lat_center: 20.2961, lng_center: 85.8245, zoom_default: 12, contact_email: 'swachh@bmc.gov.in' },
   { slug: 'pune',         name: 'Pune',         city: 'Pune',         state: 'Maharashtra',  lat_center: 18.5204, lng_center: 73.8567, zoom_default: 12, contact_email: 'swachh@pmc.gov.in' },
+  { slug: 'kolkata',      name: 'Kolkata',      city: 'Kolkata',      state: 'West Bengal',  lat_center: 22.5726, lng_center: 88.3639, zoom_default: 12, contact_email: 'swachh@kmc.gov.in' },
 ]
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,7 @@ export const SCHEMA_STATEMENTS = [
     lat_center    double precision,
     lng_center    double precision,
     zoom_default  integer     NOT NULL DEFAULT 12,
+    is_active     boolean     NOT NULL DEFAULT true,
     created_at    timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS municipalities_slug_key ON municipalities(slug)`,
@@ -161,6 +163,7 @@ export const SCHEMA_STATEMENTS = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `ALTER TABLE swachhlens_tasks ADD COLUMN IF NOT EXISTS ai_feedback text NOT NULL DEFAULT ''`,
+  `ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true`,
   `ALTER TABLE swachhlens_reports ADD COLUMN IF NOT EXISTS municipality_id uuid REFERENCES municipalities(id) ON DELETE SET NULL`,
   `ALTER TABLE swachhlens_reports ADD COLUMN IF NOT EXISTS municipality_name text`,
   `ALTER TABLE profiles ADD COLUMN IF NOT EXISTS municipality_id uuid REFERENCES municipalities(id) ON DELETE SET NULL`,

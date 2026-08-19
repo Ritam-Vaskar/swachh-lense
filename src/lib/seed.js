@@ -245,8 +245,26 @@ export async function seedDemoData() {
   const { count } = await api.from('swachhlens_reports').select('*', { count: 'exact', head: true })
   if (count && count > 0) return false
 
+  // Fetch municipalities to link IDs
+  const { data: munis } = await api.from('municipalities').select('*')
+  const muniMap = new Map()
+  if (munis) {
+    for (const m of munis) muniMap.set(m.slug, m)
+  }
+
+  const bbmp = muniMap.get('bengaluru')
+  const bmc = muniMap.get('bhubaneswar')
+  const pmc = muniMap.get('pune')
+  const kmc = muniMap.get('kolkata')
+
   const seededProfiles = {}
   for (const account of demoAccounts) {
+    const muni = account.email.startsWith('bbsr') || account.email.startsWith('operator')
+      ? bmc
+      : account.email.startsWith('kolkata')
+      ? kmc
+      : bbmp
+
     const { data: authData } = await api.auth.ensureUser({
       email: account.email,
       password: account.password,
@@ -257,21 +275,11 @@ export async function seedDemoData() {
       latitude: account.latitude,
       longitude: account.longitude,
       is_available: true,
+      municipality_id: muni?.id || null,
     })
-    const profileCheck = await api.from('profiles').select('id').eq('id', authData.user.id).maybeSingle()
-    if (!profileCheck.data) {
-      const { data: profile } = await api.from('profiles').insert({
-        id: authData.user.id,
-        role: account.role,
-        full_name: account.full_name,
-        phone: account.phone || '',
-        zone: account.zone || 'Central',
-        latitude: account.latitude,
-        longitude: account.longitude,
-        is_available: true,
-      }).select().single()
-      if (profile?.id) seededProfiles[account.full_name] = profile
-    } else {
+
+    if (authData?.user) {
+      await api.from('profiles').update({ municipality_id: muni?.id || null }).eq('id', authData.user.id)
       seededProfiles[account.full_name] = { id: authData.user.id }
     }
   }

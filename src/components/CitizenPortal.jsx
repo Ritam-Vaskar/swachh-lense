@@ -26,6 +26,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
   const [photoUrl, setPhotoUrl] = useState(null)
   const [gps, setGps] = useState(null)
   const [gpsError, setGpsError] = useState('')
+  const [availability, setAvailability] = useState({ checking: false, available: null, reason: '', message: '', municipality: null })
   const [description, setDescription] = useState('')
   const [category, setCategory] = useState('')
   const [phone, setPhone] = useState('')
@@ -41,10 +42,52 @@ export default function CitizenPortal({ onBackToSignIn }) {
     setTimeout(() => setToast(null), 3000)
   }
 
+  async function checkAvailability(lat, lng) {
+    setAvailability({ checking: true, available: null, reason: '', message: '', municipality: null })
+    try {
+      const res = await fetch(`${API_BASE}/api/municipalities/check-availability`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ latitude: lat, longitude: lng }),
+      })
+      const data = await res.json()
+      if (res.ok && data.available) {
+        setAvailability({
+          checking: false,
+          available: true,
+          reason: '',
+          message: `Service active in ${data.municipality?.name || 'your area'}`,
+          municipality: data.municipality,
+        })
+      } else {
+        setAvailability({
+          checking: false,
+          available: false,
+          reason: data.reason || 'UNAVAILABLE',
+          message: data.message || 'This service is not available in your municipal area yet.',
+          municipality: data.municipality || null,
+        })
+      }
+    } catch {
+      setAvailability({
+        checking: false,
+        available: false,
+        reason: 'NETWORK_ERROR',
+        message: 'Could not connect to service availability checker.',
+        municipality: null,
+      })
+    }
+  }
+
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => setGps({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+        (pos) => {
+          const lat = pos.coords.latitude
+          const lng = pos.coords.longitude
+          setGps({ lat, lng, accuracy: pos.coords.accuracy })
+          checkAvailability(lat, lng)
+        },
         (err) => setGpsError(err.message || 'Location permission denied'),
         { enableHighAccuracy: true, timeout: 10000 },
       )
@@ -74,6 +117,11 @@ export default function CitizenPortal({ onBackToSignIn }) {
 
   async function submitReport() {
     if (!photo) return
+    if (availability.available === false) {
+      showToast(availability.message || 'Service is not available in this area.', 'error')
+      return
+    }
+
     setStep('analyzing') // reusing analyzing card for unified step
 
     let urlToUse = uploadedImageUrl
@@ -108,7 +156,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
 
       setStep('submitting')
 
-      // 3. Submit directly to DB
+      // 3. Submit directly to DB (with full backend double-validation)
       const result = await callIntakeAgent({
         category: data.analysis.category || category || '',
         location: gps ? `GPS ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : '',
@@ -175,6 +223,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
                 photoUrl={photoUrl}
                 gps={gps}
                 gpsError={gpsError}
+                availability={availability}
                 description={description}
                 setDescription={setDescription}
                 category={category}
@@ -234,7 +283,10 @@ export default function CitizenPortal({ onBackToSignIn }) {
   )
 }
 
-function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, category, setCategory, phone, setPhone, onPhoto, onSubmit }) {
+function CaptureStep({ photoUrl, gps, gpsError, availability, description, setDescription, category, setCategory, phone, setPhone, onPhoto, onSubmit }) {
+  const isBlocked = availability?.available === false
+  const isChecking = availability?.checking
+
   return (
     <div className="capture-grid">
       <div className="capture-left">
@@ -286,7 +338,7 @@ function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, cat
               ) : gpsError ? (
                 <>
                   <Icon name="MapPinOff" size={16} color="#ef4444" />
-                  <span>{gpsError} — you can still submit without GPS.</span>
+                  <span>{gpsError}</span>
                 </>
               ) : (
                 <>
@@ -295,6 +347,31 @@ function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, cat
                 </>
               )}
             </div>
+
+            {/* Rapido-Style Service Availability Banner */}
+            {isChecking && (
+              <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: 'var(--surface-muted)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="spinner" style={{ width: 14, height: 14 }} />
+                <span>Checking service coverage in your area…</span>
+              </div>
+            )}
+
+            {availability?.available === true && (
+              <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: '#dcfce7', border: '1px solid #86efac', color: '#15803d', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon name="CheckCircle2" size={18} color="#15803d" />
+                <span><strong>Service Active:</strong> Covered by {availability.municipality?.name} · Active crew on standby</span>
+              </div>
+            )}
+
+            {availability?.available === false && (
+              <div style={{ marginTop: 12, padding: '12px 14px', borderRadius: 8, background: '#fee2e2', border: '1px solid #fca5a5', color: '#b91c1c', fontSize: 13, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                <Icon name="AlertTriangle" size={18} color="#b91c1c" style={{ flexShrink: 0, marginTop: 2 }} />
+                <div>
+                  <strong>{availability.reason === 'NO_WORKER_AVAILABLE' ? 'Crew Unavailable' : 'Service Unavailable'}</strong>
+                  <div style={{ marginTop: 2 }}>{availability.message}</div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -312,8 +389,26 @@ function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, cat
             )}
             
             {photoUrl && (
-              <button className="btn btn-primary" style={{ width: '100%', marginTop: 20, padding: 14, fontSize: 16 }} onClick={onSubmit}>
-                <Icon name="Sparkles" size={16} /> Analyze &amp; Submit
+              <button
+                className={`btn ${isBlocked ? 'btn-ghost' : 'btn-primary'}`}
+                style={{
+                  width: '100%',
+                  marginTop: 20,
+                  padding: 14,
+                  fontSize: 16,
+                  cursor: isBlocked || isChecking ? 'not-allowed' : 'pointer',
+                  opacity: isBlocked ? 0.6 : 1,
+                }}
+                onClick={isBlocked ? undefined : onSubmit}
+                disabled={isBlocked || isChecking}
+              >
+                {isChecking ? (
+                  <>Checking coverage…</>
+                ) : isBlocked ? (
+                  <><Icon name="AlertCircle" size={16} /> {availability.reason === 'NO_WORKER_AVAILABLE' ? 'No crew available' : 'Service unavailable in area'}</>
+                ) : (
+                  <><Icon name="Sparkles" size={16} /> Analyze &amp; Submit</>
+                )}
               </button>
             )}
           </div>

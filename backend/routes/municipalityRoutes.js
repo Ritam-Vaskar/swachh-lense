@@ -10,8 +10,64 @@
  */
 
 import { Router } from 'express'
+import { checkMunicipalityAvailability } from '../lib/municipalityResolver.js'
 
 const router = Router()
+
+// ---------------------------------------------------------------------------
+// POST /api/municipalities/check-availability
+// Realtime Rapido-style service and worker availability check by GPS
+// ---------------------------------------------------------------------------
+router.post('/check-availability', async (req, res) => {
+  const { latitude, longitude } = req.body || {}
+  try {
+    const result = await checkMunicipalityAvailability(latitude, longitude)
+    if (!result.available) {
+      return res.status(422).json(result)
+    }
+    res.json(result)
+  } catch (err) {
+    console.error('[Route /municipalities/check-availability]', err)
+    res.status(500).json({
+      available: false,
+      reason: 'SERVER_ERROR',
+      message: 'Failed to verify municipality availability.',
+    })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// POST /api/municipalities/onboard
+// Manual Admin / Operator onboarding for a new municipality
+// ---------------------------------------------------------------------------
+router.post('/onboard', async (req, res) => {
+  const { name, slug, city, state, contact_email, lat_center, lng_center, zoom_default = 12, is_active = true } = req.body || {}
+  if (!name || !city) {
+    return res.status(400).json({ error: 'Municipality name and city are required.' })
+  }
+
+  try {
+    const { getPool } = await import('../models/database.js')
+    const pool = getPool()
+    const finalSlug = slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+
+    const { rows } = await pool.query(
+      `INSERT INTO municipalities (name, slug, city, state, contact_email, lat_center, lng_center, zoom_default, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (slug) DO UPDATE
+         SET name = EXCLUDED.name, city = EXCLUDED.city, state = EXCLUDED.state,
+             contact_email = EXCLUDED.contact_email, lat_center = EXCLUDED.lat_center,
+             lng_center = EXCLUDED.lng_center, is_active = EXCLUDED.is_active
+       RETURNING *`,
+      [name, finalSlug, city, state || 'India', contact_email || null, lat_center ?? null, lng_center ?? null, zoom_default, is_active]
+    )
+
+    res.status(201).json({ success: true, municipality: rows[0] })
+  } catch (err) {
+    console.error('[Route /municipalities/onboard]', err)
+    res.status(500).json({ error: err.message })
+  }
+})
 
 // ---------------------------------------------------------------------------
 // GET /api/municipalities

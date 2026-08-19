@@ -218,7 +218,7 @@ function OperatorDashboard() {
       {/* Municipality context bar & live switcher */}
       <MunicipalityHeader
         municipalityId={activeMuniId}
-        onSelectMunicipality={isSuperadmin ? setActiveMuniId : undefined}
+        onSelectMunicipality={setActiveMuniId}
         reports={reports}
       />
 

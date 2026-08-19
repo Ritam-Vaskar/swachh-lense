@@ -32,12 +32,18 @@ export async function runDispatchAgent(reportId) {
   const requiredTeamSize = resourcePlan.recommended_team_size || report.team_size || 1
   const requiredVehicle  = resourcePlan.vehicle_type || 'Pushcart'
 
-  // 2. Fetch available workers in the same zone first, then any zone
-  const { rows: workers } = await pool.query(
-    `SELECT p.*, au.email FROM profiles p 
-     LEFT JOIN app_users au ON p.id = au.id
-     WHERE p.is_available = true AND p.role = 'worker'`,
-  )
+  // 2. Fetch available workers STRICTLY scoped to this municipality
+  let workersQuery = `SELECT p.*, au.email FROM profiles p 
+      LEFT JOIN app_users au ON p.id = au.id
+      WHERE p.is_available = true AND p.role = 'worker'`
+  const params = []
+
+  if (report.municipality_id) {
+    params.push(report.municipality_id)
+    workersQuery += ` AND p.municipality_id = $1`
+  }
+
+  const { rows: workers } = await pool.query(workersQuery, params)
 
   if (workers.length === 0) {
     console.log(`[DispatchAgent] No available workers found. Report ${report.reference_code} will be manually dispatched.`)

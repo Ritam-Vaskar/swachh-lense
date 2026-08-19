@@ -62,21 +62,60 @@ export async function runEscalationCheck() {
         console.log(`[EscalationAgent] ALERT: Supervisor notified for Task ${t.task_code}`)
       }
     }
+
+    // Reset backoff on successful run
+    _consecutiveFailures = 0
+
   } catch (err) {
-    console.error('[EscalationAgent] Error running escalation check:', err)
+    _consecutiveFailures++
+    const isConnectError = err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT'
+
+    if (isConnectError) {
+      // Only log the first occurrence and then every 10th — suppress the flood
+      if (_consecutiveFailures === 1) {
+        console.warn(`[EscalationAgent] ⚠ Database unreachable (${err.code}${err.hostname ? ': ' + err.hostname : ''}). Checks will back off until DB is online.`)
+      } else if (_consecutiveFailures % 10 === 0) {
+        console.warn(`[EscalationAgent] Still unreachable after ${_consecutiveFailures} attempts. Waiting for DB...`)
+      }
+    } else {
+      // Non-connection errors — always log with message only (no giant stack)
+      console.error('[EscalationAgent] Error running escalation check:', err.message)
+    }
   }
 }
 
+// Backoff state
+let _consecutiveFailures = 0
 let intervalId = null
 
-export function startEscalationAgent(intervalMs = 60000) {
-  if (intervalId) clearInterval(intervalId)
-  
-  console.log(`[EscalationAgent] Started with interval ${intervalMs}ms`)
-  
-  runEscalationCheck()
-  
-  intervalId = setInterval(runEscalationCheck, intervalMs)
-  
-  return intervalId
+export function startEscalationAgent(baseIntervalMs = 60000) {
+  if (intervalId) {
+    clearTimeout(intervalId)
+    intervalId = null
+  }
+  _consecutiveFailures = 0
+
+  console.log(`[EscalationAgent] Started with base interval ${baseIntervalMs}ms`)
+
+  // Recursive setTimeout with adaptive exponential backoff when DB is unreachable
+  const scheduleNext = async () => {
+    await runEscalationCheck()
+
+    // Exponential backoff: 60s → 120s → 240s → 480s → 600s (max)
+    const backoffFactor = _consecutiveFailures > 0 ? Math.pow(2, Math.min(_consecutiveFailures - 1, 4)) : 1
+    const nextMs = Math.min(baseIntervalMs * backoffFactor, 600000)
+
+    intervalId = setTimeout(scheduleNext, nextMs)
+  }
+
+  // Kick off immediately
+  scheduleNext()
+
+  return {
+    stop: () => {
+      clearTimeout(intervalId)
+      intervalId = null
+      console.log('[EscalationAgent] Stopped.')
+    }
+  }
 }

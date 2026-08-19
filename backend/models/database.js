@@ -294,9 +294,10 @@ export async function ensureUser({ email, password, role, full_name, phone, zone
          zone = COALESCE($4, zone), 
          latitude = COALESCE($5, latitude), 
          longitude = COALESCE($6, longitude), 
-         is_available = COALESCE($7, is_available) 
-       WHERE id = $8`,
-      [role, full_name, phone, zone, latitude, longitude, is_available, user.id],
+         is_available = COALESCE($7, is_available),
+         municipality_id = COALESCE($8, municipality_id)
+       WHERE id = $9`,
+      [role, full_name, phone, zone, latitude, longitude, is_available, municipality_id, user.id],
     )
     const profile = await getProfileByUserId(user.id)
     return { user: publicUser(user), profile }
@@ -343,7 +344,11 @@ async function seedMunicipalitiesIfNeeded() {
 
 async function seedUsersIfNeeded(muniMap = new Map()) {
   for (const account of DEMO_ACCOUNTS) {
-    const muniSlug = account.email.startsWith('bbsr') ? 'bhubaneswar' : account.email.startsWith('kolkata') ? 'bhubaneswar' : 'bengaluru'
+    const muniSlug = account.email.startsWith('bbsr')
+      ? 'bhubaneswar'
+      : account.email.startsWith('kolkata')
+      ? 'kolkata'
+      : 'bengaluru'
     const muni = muniMap.get(muniSlug) || null
     await ensureUser({ ...account, municipality_id: muni?.id || null }).catch((err) => {
       console.warn(`[SeedUsers] Note for ${account.email}:`, err.message)
@@ -358,9 +363,9 @@ export async function seedDatabaseIfNeeded() {
   const muniMap = await seedMunicipalitiesIfNeeded()
   console.log('[Seed] Municipalities seeded. Seeding users...')
   await seedUsersIfNeeded(muniMap)
-  // Backfill any existing reports that have coordinates but no municipality_id
-  // (handles re-runs when seed was written before municipality resolution existed)
+  // Backfill any existing reports and workers that have coordinates/emails but no municipality_id
   await backfillSeedMunicipalityIds(muniMap)
+  await backfillWorkerMunicipalityIds(muniMap)
   console.log('[Seed] Users seeded. Checking reports...')
 
   const { rows } = await pool.query('SELECT COUNT(*)::int AS count FROM swachhlens_reports')
@@ -455,6 +460,7 @@ export async function seedDatabaseIfNeeded() {
   // After seeding reports, backfill any that still have municipality_id = NULL
   // by matching the `municipality` slug field from SEED_REPORTS data
   await backfillSeedMunicipalityIds(muniMap)
+  await backfillWorkerMunicipalityIds(muniMap)
 
   return true
 }
@@ -488,6 +494,69 @@ async function backfillSeedMunicipalityIds(muniMap) {
     console.log('[Seed] Municipality backfill complete.')
   } catch (err) {
     console.warn('[Seed] Municipality backfill warning:', err.message)
+  }
+}
+
+async function backfillWorkerMunicipalityIds(muniMap) {
+  try {
+    const slugEntries = [...muniMap.entries()]
+    for (const [slug, muniRow] of slugEntries) {
+      // 1. By email prefix
+      const prefix = slug === 'bhubaneswar' ? 'bbsr' : slug === 'bengaluru' ? 'green' : slug
+      await pool.query(
+        `UPDATE profiles SET municipality_id = $1
+         WHERE municipality_id IS NULL AND id IN (
+           SELECT p.id FROM profiles p
+           JOIN app_users au ON p.id = au.id
+           WHERE p.municipality_id IS NULL AND (
+             au.email ILIKE $2 OR
+             (p.latitude BETWEEN ($3 - 1.0) AND ($3 + 1.0) AND p.longitude BETWEEN ($4 - 1.0) AND ($4 + 1.0))
+           )
+         )`,
+        [muniRow.id, `%${prefix}%`, muniRow.lat_center, muniRow.lng_center]
+      )
+    }
+    // Also link legacy demo squad accounts
+    const bbmp = muniMap.get('bengaluru')
+    if (bbmp) {
+      await pool.query(
+        `UPDATE profiles SET municipality_id = $1
+         WHERE municipality_id IS NULL AND id IN (
+           SELECT p.id FROM profiles p
+           JOIN app_users au ON p.id = au.id
+           WHERE au.email IN ('green@squad.local', 'river@crew.local')
+         )`,
+        [bbmp.id]
+      )
+    }
+    const bmc = muniMap.get('bhubaneswar')
+    if (bmc) {
+      await pool.query(
+        `UPDATE profiles SET municipality_id = $1
+         WHERE municipality_id IS NULL AND id IN (
+           SELECT p.id FROM profiles p
+           JOIN app_users au ON p.id = au.id
+           WHERE au.email IN ('bbsr@squad.local', 'operator@swachhlens.local')
+              OR au.email LIKE 'bbsr.%'
+         )`,
+        [bmc.id]
+      )
+    }
+    const kmc = muniMap.get('kolkata')
+    if (kmc) {
+      await pool.query(
+        `UPDATE profiles SET municipality_id = $1
+         WHERE municipality_id IS NULL AND id IN (
+           SELECT p.id FROM profiles p
+           JOIN app_users au ON p.id = au.id
+           WHERE au.email LIKE 'kolkata.%'
+         )`,
+        [kmc.id]
+      )
+    }
+    console.log('[Seed] Worker profile municipality backfill complete.')
+  } catch (err) {
+    console.warn('[Seed] Worker profile backfill warning:', err.message)
   }
 }
 

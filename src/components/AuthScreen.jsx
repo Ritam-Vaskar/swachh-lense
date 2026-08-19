@@ -106,7 +106,7 @@ export default function AuthScreen({ onCitizen }) {
           <button className={mode === 'signin' ? 'active' : ''} onClick={() => setMode('signin')}>Sign in</button>
           <button className={mode === 'signup' ? 'active' : ''} onClick={() => setMode('signup')}>Create account</button>
         </div>
-
+{/* 
         {mode === 'signin' && (
           <div className="auth-demo-presets">
             <div className="demo-presets-label">⚡ 1-Click Demo Profiles</div>
@@ -128,7 +128,7 @@ export default function AuthScreen({ onCitizen }) {
               ))}
             </div>
           </div>
-        )}
+        )} */}
 
         <form onSubmit={submit}>
           {mode === 'signup' && (

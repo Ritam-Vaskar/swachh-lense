@@ -27,11 +27,11 @@ export default function ReportDrawer({ report, onClose, onChanged, toast }) {
         setTasks(data || [])
         setLoadingTasks(false)
       })
-    api
-      .from('profiles')
-      .select('*')
-      .eq('role', 'worker')
-      .then(({ data }) => setWorkers(data || []))
+    let workerQuery = api.from('profiles').select('*').eq('role', 'worker')
+    if (report.municipality_id) {
+      workerQuery = workerQuery.eq('municipality_id', report.municipality_id)
+    }
+    workerQuery.then(({ data }) => setWorkers(data || []))
   }, [report])
 
   if (!report) return null

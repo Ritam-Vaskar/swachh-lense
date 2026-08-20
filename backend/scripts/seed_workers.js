@@ -3,67 +3,55 @@ import { getPool, seedDatabaseIfNeeded, ensureUser } from '../models/database.js
 import { DEMO_ACCOUNTS } from '../models/schema.js'
 
 async function run() {
-  console.log('🌱 Starting Worker Data Seeding for Kolkata & Bhubaneswar...\n')
+  console.log('🌱 Starting Data Seeding & Accounts Check...\n')
   
   await seedDatabaseIfNeeded()
   const pool = getPool()
 
-  for (const account of DEMO_ACCOUNTS) {
-    await ensureUser(account)
-  }
-
-  const { rows: workers } = await pool.query(
-    `SELECT p.id, p.full_name, au.email, p.role, p.zone, p.latitude, p.longitude, p.phone, p.is_available
+  const { rows: users } = await pool.query(
+    `SELECT p.id, p.full_name, au.email, p.role, p.zone, p.latitude, p.longitude, p.phone, p.is_available, m.name AS municipality_name
      FROM profiles p
      JOIN app_users au ON p.id = au.id
-     WHERE p.role = 'worker'
-     ORDER BY p.full_name ASC`
+     LEFT JOIN municipalities m ON p.municipality_id = m.id
+     ORDER BY p.role DESC, p.full_name ASC`
   )
 
   console.log('================================================================================')
-  console.log('                 SWACHHLENS WORKER FLEET - SEEDED PROFILES                      ')
+  console.log('                 SWACHHLENS ROLES & ACCOUNTS OVERVIEW                           ')
   console.log('================================================================================')
 
-  const kolkataWorkers = workers.filter(w => w.email.includes('kolkata'))
-  const bbsrWorkers = workers.filter(w => w.email.includes('bbsr'))
-  const otherWorkers = workers.filter(w => !w.email.includes('kolkata') && !w.email.includes('bbsr'))
+  const superadmins = users.filter(u => u.role === 'superadmin')
+  const operators = users.filter(u => u.role === 'operator')
+  const workers = users.filter(u => u.role === 'worker')
 
-  console.log('\n📍 KOLKATA SQUADS (West Bengal):')
-  console.table(kolkataWorkers.map(w => ({
+  console.log('\n👑 SUPER ADMIN ACCOUNTS (National Jurisdiction - All Municipalities):')
+  console.table(superadmins.map(u => ({
+    'Name': u.full_name,
+    'Email': u.email,
+    'Role': u.role,
+    'Access': 'All Municipalities (National)',
+    'Phone': u.phone
+  })))
+
+  console.log('\n🏛️ MUNICIPALITY OPERATOR DESKS (Scoped by Municipality):')
+  console.table(operators.map(u => ({
+    'Desk Name': u.full_name,
+    'Email': u.email,
+    'Role': u.role,
+    'Assigned Municipality': u.municipality_name || 'BBMP (Bengaluru)',
+    'Zone': u.zone
+  })))
+
+  console.log('\n👷 FIELD WORKER SQUADS:')
+  console.table(workers.map(w => ({
     'Squad Name': w.full_name,
     'Email': w.email,
+    'Municipality': w.municipality_name || 'Unassigned',
     'Zone': w.zone,
-    'Latitude': w.latitude,
-    'Longitude': w.longitude,
-    'Phone': w.phone,
     'Status': w.is_available ? 'Available' : 'Busy'
   })))
 
-  console.log('\n📍 BHUBANESWAR SQUADS (Odisha):')
-  console.table(bbsrWorkers.map(w => ({
-    'Squad Name': w.full_name,
-    'Email': w.email,
-    'Zone': w.zone,
-    'Latitude': w.latitude,
-    'Longitude': w.longitude,
-    'Phone': w.phone,
-    'Status': w.is_available ? 'Available' : 'Busy'
-  })))
-
-  if (otherWorkers.length > 0) {
-    console.log('\n📍 OTHER REGISTERED SQUADS:')
-    console.table(otherWorkers.map(w => ({
-      'Squad Name': w.full_name,
-      'Email': w.email,
-      'Zone': w.zone,
-      'Latitude': w.latitude,
-      'Longitude': w.longitude,
-      'Phone': w.phone,
-      'Status': w.is_available ? 'Available' : 'Busy'
-    })))
-  }
-
-  console.log(`\n✅ Total Workers Active in Database: ${workers.length}`)
+  console.log(`\n✅ Total Accounts Active in Database: ${users.length} (${superadmins.length} Super Admin, ${operators.length} Operators, ${workers.length} Workers)`)
   process.exit(0)
 }
 

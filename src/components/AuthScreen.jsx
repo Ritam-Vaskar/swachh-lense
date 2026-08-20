@@ -4,23 +4,116 @@ import { Icon } from './ui'
 import { api, ZONES } from '../lib/api/index.js'
 
 const DEMO_PRESETS = [
-  { label: 'Bengaluru (BBMP) Operator', email: 'operator@swachhlens.local', role: 'operator', icon: 'Building2', color: '#6366f1' },
-  { label: 'Bengaluru Squad (Worker)', email: 'green@squad.local', role: 'worker', icon: 'HardHat', color: '#16a34a' },
-  { label: 'Bhubaneswar (BMC) Worker', email: 'bbsr@squad.local', role: 'worker', icon: 'MapPin', color: '#0ea5e9' },
+  {
+    category: 'Super Admin',
+    items: [
+      {
+        label: 'National Super Admin',
+        badge: '👑 All Municipalities',
+        email: 'superadmin@swachhlens.local',
+        password: 'Swachh123!',
+        role: 'superadmin',
+        icon: 'ShieldCheck',
+        color: '#f59e0b',
+      },
+    ],
+  },
+  {
+    category: 'Municipality Operators',
+    items: [
+      {
+        label: 'Bengaluru (BBMP) Operator',
+        badge: '🏛️ BBMP Desk',
+        email: 'operator.bengaluru@swachhlens.local',
+        password: 'Swachh123!',
+        role: 'operator',
+        icon: 'Building2',
+        color: '#6366f1',
+      },
+      {
+        label: 'Bhubaneswar (BMC) Operator',
+        badge: '🏛️ BMC Desk',
+        email: 'operator.bhubaneswar@swachhlens.local',
+        password: 'Swachh123!',
+        role: 'operator',
+        icon: 'Building2',
+        color: '#0ea5e9',
+      },
+      {
+        label: 'Kolkata (KMC) Operator',
+        badge: '🏛️ KMC Desk',
+        email: 'operator.kolkata@swachhlens.local',
+        password: 'Swachh123!',
+        role: 'operator',
+        icon: 'Building2',
+        color: '#8b5cf6',
+      },
+      {
+        label: 'Pune (PMC) Operator',
+        badge: '🏛️ PMC Desk',
+        email: 'operator.pune@swachhlens.local',
+        password: 'Swachh123!',
+        role: 'operator',
+        icon: 'Building2',
+        color: '#ec4899',
+      },
+    ],
+  },
+  {
+    category: 'Field Squads',
+    items: [
+      {
+        label: 'Bengaluru Squad (Green A)',
+        badge: '👷 Bengaluru',
+        email: 'green@squad.local',
+        password: 'Swachh123!',
+        role: 'worker',
+        icon: 'HardHat',
+        color: '#16a34a',
+      },
+      {
+        label: 'Bhubaneswar Squad (Patia)',
+        badge: '👷 Bhubaneswar',
+        email: 'bbsr.patia@squad.local',
+        password: 'Swachh123!',
+        role: 'worker',
+        icon: 'HardHat',
+        color: '#0284c7',
+      },
+      {
+        label: 'Kolkata Squad (Salt Lake)',
+        badge: '👷 Kolkata',
+        email: 'kolkata.saltlake@squad.local',
+        password: 'Swachh123!',
+        role: 'worker',
+        icon: 'HardHat',
+        color: '#7c3aed',
+      },
+    ],
+  },
 ]
 
 export default function AuthScreen({ onCitizen }) {
   const { signIn, signUp } = useAuth()
   const [mode, setMode] = useState('signin')
   const [role, setRole] = useState('operator')
-  const [form, setForm] = useState({ email: '', password: '', full_name: '', phone: '', zone: 'Central' })
+  const [municipalities, setMunicipalities] = useState([])
+  const [form, setForm] = useState({
+    email: '',
+    password: '',
+    full_name: '',
+    phone: '',
+    zone: 'Central',
+    municipality_id: '',
+  })
   const [gps, setGps] = useState(null)
   const [detectingGps, setDetectingGps] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [presetFilter, setPresetFilter] = useState('all')
 
   useEffect(() => {
-    // Load municipalities for the signup dropdown
+    // Load municipalities for dropdowns and role assignment
     api
       .from('municipalities')
       .select('*')
@@ -49,7 +142,7 @@ export default function AuthScreen({ onCitizen }) {
       () => {
         setDetectingGps(false)
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 10000 },
     )
   }
 
@@ -58,6 +151,23 @@ export default function AuthScreen({ onCitizen }) {
       detectLocation()
     }
   }, [mode, role])
+
+  async function handleDemoLogin(preset) {
+    setBusy(true)
+    setError('')
+    setForm((f) => ({ ...f, email: preset.email, password: preset.password }))
+    try {
+      const { error } = await signIn({ email: preset.email, password: preset.password })
+      if (error) {
+        const msg = error.message || String(error)
+        setError(msg.toLowerCase().includes('invalid') || msg.toLowerCase().includes('credential') ? 'Incorrect email or password.' : msg)
+      }
+    } catch (err) {
+      setError(err.message || 'An error occurred during demo login.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function submit(e) {
     e.preventDefault()
@@ -78,6 +188,7 @@ export default function AuthScreen({ onCitizen }) {
         const { error } = await signUp({
           ...form,
           role,
+          municipality_id: role === 'superadmin' ? null : form.municipality_id || null,
           latitude: role === 'worker' ? (gps?.lat ?? null) : null,
           longitude: role === 'worker' ? (gps?.lng ?? null) : null,
         })
@@ -95,70 +206,152 @@ export default function AuthScreen({ onCitizen }) {
 
   return (
     <div className="auth-screen">
-      <div className="auth-card">
+      <div className="auth-card" style={{ maxWidth: 540 }}>
         <div className="auth-brand">
           <div className="brand-mark"><Icon name="Leaf" size={24} /></div>
           <h1>SwachhLens</h1>
-          <p>Civic waste operations — municipal operators, field workers & citizens.</p>
+          <p>Civic waste intelligence & operations across India&apos;s municipalities.</p>
         </div>
 
         <div className="auth-tabs">
           <button className={mode === 'signin' ? 'active' : ''} onClick={() => setMode('signin')}>Sign in</button>
           <button className={mode === 'signup' ? 'active' : ''} onClick={() => setMode('signup')}>Create account</button>
         </div>
-{/* 
+
         {mode === 'signin' && (
-          <div className="auth-demo-presets">
-            <div className="demo-presets-label">⚡ 1-Click Demo Profiles</div>
-            <div className="demo-presets-grid">
-              {DEMO_PRESETS.map((preset) => (
+          <div className="auth-demo-presets" style={{ marginBottom: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div className="demo-presets-label" style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)' }}>
+                ⚡ Quick Demo Profiles
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 6 }}>
+              {DEMO_PRESETS.flatMap((g) => g.items).map((preset) => (
                 <button
                   key={preset.email}
                   type="button"
                   className="demo-preset-btn"
                   onClick={() => handleDemoLogin(preset)}
                   disabled={busy}
+                  style={{
+                    padding: '8px 10px',
+                    textAlign: 'left',
+                    borderRadius: 8,
+                    border: '1px solid var(--border-color, #e2e8f0)',
+                    background: 'var(--bg-subtle, #f8fafc)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 3,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
                 >
-                  <span className="demo-preset-dot" style={{ background: preset.color }} />
-                  <div className="demo-preset-text">
-                    <strong>{preset.label}</strong>
-                    <small>{preset.email}</small>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: preset.color, flexShrink: 0 }} />
+                    <span style={{ fontSize: 11, fontWeight: 700, color: preset.color }}>{preset.badge}</span>
                   </div>
+                  <strong style={{ fontSize: 12, color: 'var(--text-main, #0f172a)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {preset.label}
+                  </strong>
+                  <small style={{ fontSize: 10, color: 'var(--text-muted, #64748b)', fontFamily: 'monospace' }}>
+                    {preset.email.split('@')[0]}
+                  </small>
                 </button>
               ))}
             </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, textAlign: 'center' }}>
+              🔑 All demo accounts use password: <code style={{ color: 'var(--primary)', fontWeight: 600 }}>Swachh123!</code>
+            </div>
           </div>
-        )} */}
+        )}
 
         <form onSubmit={submit}>
           {mode === 'signup' && (
-            <div className="auth-role">
-              <button type="button" className={role === 'operator' ? 'active' : ''} onClick={() => setRole('operator')}>
-                <Icon name="LayoutDashboard" size={18} /> Operator
-                <small>Municipality / ULB office</small>
+            <div className="auth-role" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
+              <button
+                type="button"
+                className={role === 'operator' ? 'active' : ''}
+                onClick={() => setRole('operator')}
+                style={{ padding: '10px 8px', textAlign: 'center' }}
+              >
+                <Icon name="LayoutDashboard" size={18} />
+                <div style={{ fontWeight: 600, fontSize: 13 }}>Operator</div>
+                <small style={{ fontSize: 10 }}>ULB Office</small>
               </button>
-              <button type="button" className={role === 'worker' ? 'active' : ''} onClick={() => { setRole('worker'); detectLocation() }}>
-                <Icon name="HardHat" size={18} /> Worker
-                <small>Field cleanup squad</small>
+              <button
+                type="button"
+                className={role === 'worker' ? 'active' : ''}
+                onClick={() => { setRole('worker'); detectLocation() }}
+                style={{ padding: '10px 8px', textAlign: 'center' }}
+              >
+                <Icon name="HardHat" size={18} />
+                <div style={{ fontWeight: 600, fontSize: 13 }}>Worker</div>
+                <small style={{ fontSize: 10 }}>Field Squad</small>
+              </button>
+              <button
+                type="button"
+                className={role === 'superadmin' ? 'active' : ''}
+                onClick={() => setRole('superadmin')}
+                style={{ padding: '10px 8px', textAlign: 'center' }}
+              >
+                <Icon name="ShieldCheck" size={18} />
+                <div style={{ fontWeight: 600, fontSize: 13 }}>Super Admin</div>
+                <small style={{ fontSize: 10 }}>National View</small>
               </button>
             </div>
           )}
 
           {mode === 'signup' && (
             <div className="form-group">
-              <label>Full name</label>
-              <input value={form.full_name} onChange={(e) => update('full_name', e.target.value)} placeholder="Your name (e.g. Murshidabad Squad)" />
+              <label>Full name / Desk name</label>
+              <input
+                value={form.full_name}
+                onChange={(e) => update('full_name', e.target.value)}
+                placeholder={role === 'operator' ? 'e.g. BBMP Ward Officer' : role === 'superadmin' ? 'e.g. National Admin' : 'e.g. Kolkata Clean Squad'}
+                required
+              />
+            </div>
+          )}
+
+          {mode === 'signup' && role !== 'superadmin' && municipalities.length > 0 && (
+            <div className="form-group">
+              <label>Assigned Municipality / ULB</label>
+              <select
+                value={form.municipality_id}
+                onChange={(e) => update('municipality_id', e.target.value)}
+                required
+              >
+                {municipalities.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    🏛️ {m.name} ({m.city}, {m.state})
+                  </option>
+                ))}
+              </select>
             </div>
           )}
 
           <div className="form-group">
-            <label>Email</label>
-            <input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} placeholder="officer@city.gov.in" required />
+            <label>Email address</label>
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) => update('email', e.target.value)}
+              placeholder="officer@city.gov.in or operator.bengaluru@swachhlens.local"
+              required
+            />
           </div>
 
           <div className="form-group">
             <label>Password</label>
-            <input type="password" value={form.password} onChange={(e) => update('password', e.target.value)} placeholder="At least 6 characters" required minLength={6} />
+            <input
+              type="password"
+              value={form.password}
+              onChange={(e) => update('password', e.target.value)}
+              placeholder="Password (e.g. Swachh123!)"
+              required
+              minLength={6}
+            />
           </div>
 
           {mode === 'signup' && role === 'worker' && (

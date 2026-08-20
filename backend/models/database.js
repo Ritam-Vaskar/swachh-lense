@@ -267,7 +267,7 @@ function publicUser(user) {
   return { id: user.id, email: user.email, created_at: user.created_at }
 }
 
-export async function signUpUser({ email, password, role, full_name, phone, zone, latitude, longitude }) {
+export async function signUpUser({ email, password, role, full_name, phone, zone, latitude, longitude, municipality_id = null }) {
   const existing = await pool.query('SELECT * FROM app_users WHERE email = $1 LIMIT 1', [email])
   if (existing.rows[0]) throw new Error('An account with this email already exists.')
 
@@ -275,43 +275,45 @@ export async function signUpUser({ email, password, role, full_name, phone, zone
   const userId = makeId()
   await pool.query('INSERT INTO app_users (id, email, password_hash) VALUES ($1, $2, $3)', [userId, email, password_hash])
   await pool.query(
-    'INSERT INTO profiles (id, role, full_name, phone, zone, latitude, longitude, is_available) VALUES ($1, $2, $3, $4, $5, $6, $7, true)',
-    [userId, role || 'worker', full_name || email.split('@')[0], phone || '', zone || 'Central', latitude ?? null, longitude ?? null],
+    'INSERT INTO profiles (id, role, full_name, phone, zone, latitude, longitude, is_available, municipality_id) VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)',
+    [userId, role || 'worker', full_name || email.split('@')[0], phone || '', zone || 'Central', latitude ?? null, longitude ?? null, municipality_id || null],
   )
   const user = { id: userId, email, created_at: new Date().toISOString() }
   return { user: publicUser(user), profile: await getProfileByUserId(userId) }
 }
 
 export async function ensureUser({ email, password, role, full_name, phone, zone, latitude, longitude, is_available = true, municipality_id = null }) {
+  let user
+  const password_hash = password ? hashPassword(password) : null
   const existing = await pool.query('SELECT * FROM app_users WHERE email = $1 LIMIT 1', [email])
   if (existing.rows[0]) {
-    const user = existing.rows[0]
-    await pool.query(
-      `UPDATE profiles SET 
-         role = COALESCE($1, role), 
-         full_name = COALESCE($2, full_name), 
-         phone = COALESCE($3, phone), 
-         zone = COALESCE($4, zone), 
-         latitude = COALESCE($5, latitude), 
-         longitude = COALESCE($6, longitude), 
-         is_available = COALESCE($7, is_available),
-         municipality_id = COALESCE($8, municipality_id)
-       WHERE id = $9`,
-      [role, full_name, phone, zone, latitude, longitude, is_available, municipality_id, user.id],
-    )
-    const profile = await getProfileByUserId(user.id)
-    return { user: publicUser(user), profile }
+    user = existing.rows[0]
+    if (password_hash) {
+      await pool.query('UPDATE app_users SET password_hash = $1 WHERE id = $2', [password_hash, user.id])
+    }
+  } else {
+    const userId = makeId()
+    const { rows } = await pool.query('INSERT INTO app_users (id, email, password_hash) VALUES ($1, $2, $3) RETURNING *', [userId, email, password_hash || hashPassword('Swachh123!')])
+    user = rows[0]
   }
 
-  const password_hash = hashPassword(password)
-  const userId = makeId()
-  await pool.query('INSERT INTO app_users (id, email, password_hash) VALUES ($1, $2, $3)', [userId, email, password_hash])
   await pool.query(
-    'INSERT INTO profiles (id, role, full_name, phone, zone, latitude, longitude, is_available, municipality_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-    [userId, role || 'worker', full_name || email.split('@')[0], phone || '', zone || 'Central', latitude ?? null, longitude ?? null, is_available, municipality_id || null],
+    `INSERT INTO profiles (id, role, full_name, phone, zone, latitude, longitude, is_available, municipality_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (id) DO UPDATE SET
+       role = EXCLUDED.role,
+       full_name = EXCLUDED.full_name,
+       phone = EXCLUDED.phone,
+       zone = EXCLUDED.zone,
+       latitude = COALESCE(EXCLUDED.latitude, profiles.latitude),
+       longitude = COALESCE(EXCLUDED.longitude, profiles.longitude),
+       is_available = EXCLUDED.is_available,
+       municipality_id = EXCLUDED.municipality_id`,
+    [user.id, role || 'worker', full_name || email.split('@')[0], phone || '', zone || 'Central', latitude ?? null, longitude ?? null, is_available, municipality_id || null],
   )
-  const user = { id: userId, email, created_at: new Date().toISOString() }
-  return { user: publicUser(user), profile: await getProfileByUserId(userId) }
+
+  const profile = await getProfileByUserId(user.id)
+  return { user: publicUser(user), profile }
 }
 
 export async function signInUser({ email, password }) {
@@ -344,12 +346,19 @@ async function seedMunicipalitiesIfNeeded() {
 
 async function seedUsersIfNeeded(muniMap = new Map()) {
   for (const account of DEMO_ACCOUNTS) {
-    const muniSlug = account.email.startsWith('bbsr')
-      ? 'bhubaneswar'
-      : account.email.startsWith('kolkata')
-      ? 'kolkata'
-      : 'bengaluru'
-    const muni = muniMap.get(muniSlug) || null
+    let muniSlug = null
+    if (account.role === 'superadmin' || account.email.startsWith('superadmin')) {
+      muniSlug = null
+    } else if (account.email.includes('bbsr') || account.email.includes('bhubaneswar')) {
+      muniSlug = 'bhubaneswar'
+    } else if (account.email.includes('kolkata')) {
+      muniSlug = 'kolkata'
+    } else if (account.email.includes('pune')) {
+      muniSlug = 'pune'
+    } else if (account.email.includes('bengaluru') || account.email.includes('green') || account.email.includes('river') || account.email === 'operator@swachhlens.local') {
+      muniSlug = 'bengaluru'
+    }
+    const muni = muniSlug ? muniMap.get(muniSlug) || null : null
     await ensureUser({ ...account, municipality_id: muni?.id || null }).catch((err) => {
       console.warn(`[SeedUsers] Note for ${account.email}:`, err.message)
     })
@@ -508,7 +517,7 @@ async function backfillWorkerMunicipalityIds(muniMap) {
          WHERE municipality_id IS NULL AND id IN (
            SELECT p.id FROM profiles p
            JOIN app_users au ON p.id = au.id
-           WHERE p.municipality_id IS NULL AND (
+           WHERE p.municipality_id IS NULL AND au.email NOT LIKE 'superadmin%' AND (
              au.email ILIKE $2 OR
              (p.latitude BETWEEN ($3 - 1.0) AND ($3 + 1.0) AND p.longitude BETWEEN ($4 - 1.0) AND ($4 + 1.0))
            )
@@ -516,15 +525,27 @@ async function backfillWorkerMunicipalityIds(muniMap) {
         [muniRow.id, `%${prefix}%`, muniRow.lat_center, muniRow.lng_center]
       )
     }
-    // Also link legacy demo squad accounts
+
+    // Ensure superadmin account has role='superadmin' and municipality_id=NULL
+    await pool.query(
+      `UPDATE profiles SET role = 'superadmin', municipality_id = NULL
+       WHERE id IN (
+         SELECT p.id FROM profiles p
+         JOIN app_users au ON p.id = au.id
+         WHERE au.email LIKE 'superadmin%'
+       )`
+    )
+
+    // Explicitly link operator and squad profiles to their respective municipalities
     const bbmp = muniMap.get('bengaluru')
     if (bbmp) {
       await pool.query(
         `UPDATE profiles SET municipality_id = $1
-         WHERE municipality_id IS NULL AND id IN (
+         WHERE id IN (
            SELECT p.id FROM profiles p
            JOIN app_users au ON p.id = au.id
-           WHERE au.email IN ('green@squad.local', 'river@crew.local')
+           WHERE au.email IN ('operator.bengaluru@swachhlens.local', 'operator@swachhlens.local', 'green@squad.local', 'river@crew.local', 'bbmp-operator@swachhlens.local')
+              OR au.email LIKE 'bengaluru.%'
          )`,
         [bbmp.id]
       )
@@ -533,11 +554,12 @@ async function backfillWorkerMunicipalityIds(muniMap) {
     if (bmc) {
       await pool.query(
         `UPDATE profiles SET municipality_id = $1
-         WHERE municipality_id IS NULL AND id IN (
+         WHERE id IN (
            SELECT p.id FROM profiles p
            JOIN app_users au ON p.id = au.id
-           WHERE au.email IN ('bbsr@squad.local', 'operator@swachhlens.local')
+           WHERE au.email IN ('operator.bhubaneswar@swachhlens.local', 'bbsr@squad.local', 'bmc-operator@swachhlens.local', 'bmc@squad.local')
               OR au.email LIKE 'bbsr.%'
+              OR au.email LIKE 'bhubaneswar.%'
          )`,
         [bmc.id]
       )
@@ -546,15 +568,29 @@ async function backfillWorkerMunicipalityIds(muniMap) {
     if (kmc) {
       await pool.query(
         `UPDATE profiles SET municipality_id = $1
-         WHERE municipality_id IS NULL AND id IN (
+         WHERE id IN (
            SELECT p.id FROM profiles p
            JOIN app_users au ON p.id = au.id
-           WHERE au.email LIKE 'kolkata.%'
+           WHERE au.email IN ('operator.kolkata@swachhlens.local', 'kmc-operator@swachhlens.local', 'kol@sqad.local')
+              OR au.email LIKE 'kolkata.%'
          )`,
         [kmc.id]
       )
     }
-    console.log('[Seed] Worker profile municipality backfill complete.')
+    const pmc = muniMap.get('pune')
+    if (pmc) {
+      await pool.query(
+        `UPDATE profiles SET municipality_id = $1
+         WHERE id IN (
+           SELECT p.id FROM profiles p
+           JOIN app_users au ON p.id = au.id
+           WHERE au.email IN ('operator.pune@swachhlens.local', 'pmc-operator@swachhlens.local')
+              OR au.email LIKE 'pune.%'
+         )`,
+        [pmc.id]
+      )
+    }
+    console.log('[Seed] Worker and operator profile municipality backfill complete.')
   } catch (err) {
     console.warn('[Seed] Worker profile backfill warning:', err.message)
   }

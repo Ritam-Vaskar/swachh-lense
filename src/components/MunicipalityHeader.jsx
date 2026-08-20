@@ -1,14 +1,10 @@
 /**
  * MunicipalityHeader.jsx
  *
- * A branded municipality context bar shown inside the OperatorDashboard.
- * Fetches the municipality record matching the active municipality_id
- * and renders:
- *   - Municipality name + city / state chip
- *   - A dropdown switcher to inspect other Urban Local Bodies (e.g. BBMP, BMC, PMC, or All)
- *   - A coloured accent bar unique to each municipality
- *   - Live connection badge
- *   - Compact KPI summary (total, active, critical)
+ * Branded municipality context bar shown in OperatorDashboard.
+ * - For Super Admin: provides an interactive switcher between "All Municipalities (National Overview)"
+ *   and individual municipalities.
+ * - For regular Operators: locked to their assigned municipality with an authorized jurisdiction badge.
  */
 
 import { useEffect, useState } from 'react'
@@ -16,7 +12,7 @@ import { api } from '../lib/api/index.js'
 import { Icon } from './ui'
 
 const MUNI_PALETTE = [
-  '#6366f1', // indigo   — default
+  '#6366f1', // indigo
   '#0ea5e9', // sky
   '#8b5cf6', // violet
   '#f59e0b', // amber
@@ -37,6 +33,7 @@ export default function MunicipalityHeader({
   municipalityId,
   onSelectMunicipality,
   reports = [],
+  isSuperadmin = false,
 }) {
   const [muniList, setMuniList] = useState([])
   const [currentMuni, setCurrentMuni] = useState(null)
@@ -87,8 +84,8 @@ export default function MunicipalityHeader({
       <div className="muni-info">
         <div className="muni-name-row">
           <span className="muni-dot" style={{ background: color }} />
-          
-          {muniList.length > 0 && onSelectMunicipality ? (
+
+          {isSuperadmin && muniList.length > 0 && onSelectMunicipality ? (
             <div className="muni-switcher-wrap">
               <select
                 className="muni-select"
@@ -104,9 +101,24 @@ export default function MunicipalityHeader({
               </select>
             </div>
           ) : (
-            <span className="muni-name">
-              {currentMuni ? `${currentMuni.name} (${currentMuni.city})` : 'All Municipalities'}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="muni-name" style={{ fontWeight: 700, fontSize: 15 }}>
+                🏛️ {currentMuni ? `${currentMuni.name} (${currentMuni.city})` : 'All Municipalities'}
+              </span>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '2px 8px',
+                  borderRadius: 12,
+                  background: 'rgba(22, 163, 74, 0.1)',
+                  color: '#16a34a',
+                  border: '1px solid rgba(22, 163, 74, 0.25)',
+                }}
+              >
+                🔒 Scoped Jurisdiction
+              </span>
+            </div>
           )}
 
           {currentMuni && (
@@ -115,12 +127,32 @@ export default function MunicipalityHeader({
             </span>
           )}
           {isNational && (
-            <span className="muni-geo">India · National</span>
+            <span className="muni-geo">India · National Overview</span>
+          )}
+
+          {isSuperadmin && (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                padding: '2px 6px',
+                borderRadius: 4,
+                background: '#f59e0b',
+                color: '#fff',
+                textTransform: 'uppercase',
+                letterSpacing: 0.5,
+              }}
+            >
+              👑 Super Admin
+            </span>
           )}
         </div>
         <div className="muni-sub">
           <Icon name="MapPin" size={11} />
-          &nbsp;{isNational ? 'Aggregated cross-municipality view' : `Scoped operations for ${currentMuni?.name || 'municipality'}`}
+          &nbsp;
+          {isNational
+            ? 'Aggregated cross-municipality operations and national metrics'
+            : `Scoped exclusively to ${currentMuni?.name || 'assigned municipality'} jurisdiction`}
         </div>
       </div>
 

@@ -118,11 +118,54 @@ const sampleTasks = [
 ]
 
 const demoAccounts = [
+  // Super Admin Account (Full access to all municipalities)
+  {
+    email: 'superadmin@swachhlens.local',
+    password: 'Swachh123!',
+    role: 'superadmin',
+    full_name: 'National Super Admin',
+    phone: '+91 99000 00000',
+    zone: 'Central',
+  },
+  // Dedicated Municipality Operators
+  {
+    email: 'operator.bengaluru@swachhlens.local',
+    password: 'Swachh123!',
+    role: 'operator',
+    full_name: 'BBMP Bengaluru Control Desk',
+    phone: '+91 98000 10001',
+    zone: 'Central',
+  },
+  {
+    email: 'operator.bhubaneswar@swachhlens.local',
+    password: 'Swachh123!',
+    role: 'operator',
+    full_name: 'BMC Bhubaneswar Control Desk',
+    phone: '+91 98000 10002',
+    zone: 'Central',
+  },
+  {
+    email: 'operator.kolkata@swachhlens.local',
+    password: 'Swachh123!',
+    role: 'operator',
+    full_name: 'KMC Kolkata Control Desk',
+    phone: '+91 98000 10003',
+    zone: 'Central',
+  },
+  {
+    email: 'operator.pune@swachhlens.local',
+    password: 'Swachh123!',
+    role: 'operator',
+    full_name: 'PMC Pune Control Desk',
+    phone: '+91 98000 10004',
+    zone: 'Central',
+  },
+  // Backward-compatible Demo Operator (mapped to Bengaluru)
   {
     email: 'operator@swachhlens.local',
     password: 'Swachh123!',
     role: 'operator',
-    full_name: 'Demo Operator',
+    full_name: 'Demo Operator (Bengaluru)',
     phone: '+91 90000 00001',
     zone: 'Central',
   },
@@ -208,6 +251,17 @@ const demoAccounts = [
     latitude: 20.2582,
     longitude: 85.7836,
   },
+  // Pune Squad
+  {
+    email: 'pune.kothrud@squad.local',
+    password: 'Swachh123!',
+    role: 'worker',
+    full_name: 'Pune Squad - Kothrud',
+    phone: '+91 98200 40001',
+    zone: 'West',
+    latitude: 18.5076,
+    longitude: 73.8063,
+  },
   // Legacy Squads
   {
     email: 'green@squad.local',
@@ -259,11 +313,18 @@ export async function seedDemoData() {
 
   const seededProfiles = {}
   for (const account of demoAccounts) {
-    const muni = account.email.startsWith('bbsr') || account.email.startsWith('operator')
-      ? bmc
-      : account.email.startsWith('kolkata')
-      ? kmc
-      : bbmp
+    let muni = null
+    if (account.role === 'superadmin' || account.email.startsWith('superadmin')) {
+      muni = null
+    } else if (account.email.includes('bbsr') || account.email.includes('bhubaneswar')) {
+      muni = bmc
+    } else if (account.email.includes('kolkata')) {
+      muni = kmc
+    } else if (account.email.includes('pune')) {
+      muni = pmc
+    } else if (account.email.includes('bengaluru') || account.email.includes('green') || account.email.includes('river') || account.email === 'operator@swachhlens.local') {
+      muni = bbmp
+    }
 
     const { data: authData } = await api.auth.ensureUser({
       email: account.email,
@@ -279,7 +340,10 @@ export async function seedDemoData() {
     })
 
     if (authData?.user) {
-      await api.from('profiles').update({ municipality_id: muni?.id || null }).eq('id', authData.user.id)
+      await api.from('profiles').update({ 
+        role: account.role,
+        municipality_id: muni?.id || null 
+      }).eq('id', authData.user.id)
       seededProfiles[account.full_name] = { id: authData.user.id }
     }
   }

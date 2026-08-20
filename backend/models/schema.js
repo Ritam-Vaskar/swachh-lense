@@ -4,7 +4,17 @@ import crypto from 'node:crypto'
 // Demo accounts — each tied to a municipality slug
 // ---------------------------------------------------------------------------
 export const DEMO_ACCOUNTS = [
-  { email: 'operator@swachhlens.local', password: 'Swachh123!', role: 'operator', full_name: 'Demo Operator', phone: '+91 90000 00001', zone: 'Central' },
+  // Super Admin Account (Full access to all municipalities)
+  { email: 'superadmin@swachhlens.local', password: 'Swachh123!', role: 'superadmin', full_name: 'National Super Admin', phone: '+91 99000 00000', zone: 'Central' },
+
+  // Dedicated Municipality Operators
+  { email: 'operator.bengaluru@swachhlens.local', password: 'Swachh123!', role: 'operator', full_name: 'BBMP Bengaluru Control Desk', phone: '+91 98000 10001', zone: 'Central' },
+  { email: 'operator.bhubaneswar@swachhlens.local', password: 'Swachh123!', role: 'operator', full_name: 'BMC Bhubaneswar Control Desk', phone: '+91 98000 10002', zone: 'Central' },
+  { email: 'operator.kolkata@swachhlens.local', password: 'Swachh123!', role: 'operator', full_name: 'KMC Kolkata Control Desk', phone: '+91 98000 10003', zone: 'Central' },
+  { email: 'operator.pune@swachhlens.local', password: 'Swachh123!', role: 'operator', full_name: 'PMC Pune Control Desk', phone: '+91 98000 10004', zone: 'Central' },
+
+  // Backward-compatible Demo Operator (mapped to Bengaluru)
+  { email: 'operator@swachhlens.local', password: 'Swachh123!', role: 'operator', full_name: 'Demo Operator (Bengaluru)', phone: '+91 90000 00001', zone: 'Central' },
   
   // Kolkata Worker Groups (4 distinct GPS locations)
   { email: 'kolkata.saltlake@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Kolkata Squad - Salt Lake', phone: '+91 98300 20001', zone: 'East', latitude: 22.5804, longitude: 88.4378 },
@@ -17,6 +27,9 @@ export const DEMO_ACCOUNTS = [
   { email: 'bbsr.saheednagar@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Bhubaneswar Squad - Saheed Nagar', phone: '+91 94370 30002', zone: 'Central', latitude: 20.2885, longitude: 85.8436 },
   { email: 'bbsr.nayapalli@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Bhubaneswar Squad - Nayapalli', phone: '+91 94370 30003', zone: 'West', latitude: 20.3012, longitude: 85.8155 },
   { email: 'bbsr.khandagiri@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Bhubaneswar Squad - Khandagiri', phone: '+91 94370 30004', zone: 'West', latitude: 20.2582, longitude: 85.7836 },
+
+  // Pune Squad
+  { email: 'pune.kothrud@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Pune Squad - Kothrud', phone: '+91 98200 40001', zone: 'West', latitude: 18.5076, longitude: 73.8063 },
 
   // Legacy Squads
   { email: 'green@squad.local', password: 'Swachh123!', role: 'worker', full_name: 'Green Squad A', phone: '+91 90000 10001', zone: 'Central', latitude: 12.9783, longitude: 77.5921 },
@@ -164,9 +177,9 @@ export const SCHEMA_STATEMENTS = [
   )`,
   `ALTER TABLE swachhlens_tasks ADD COLUMN IF NOT EXISTS ai_feedback text NOT NULL DEFAULT ''`,
   `ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true`,
-  `ALTER TABLE swachhlens_reports ADD COLUMN IF NOT EXISTS municipality_id uuid REFERENCES municipalities(id) ON DELETE SET NULL`,
-  `ALTER TABLE swachhlens_reports ADD COLUMN IF NOT EXISTS municipality_name text`,
   `ALTER TABLE profiles ADD COLUMN IF NOT EXISTS municipality_id uuid REFERENCES municipalities(id) ON DELETE SET NULL`,
+  `ALTER TABLE profiles DROP CONSTRAINT IF EXISTS profiles_role_check`,
+  `ALTER TABLE profiles ADD CONSTRAINT profiles_role_check CHECK (role IN ('operator', 'worker', 'superadmin'))`,
   `CREATE INDEX IF NOT EXISTS swachhlens_reports_status_idx        ON swachhlens_reports(status)`,
   `CREATE INDEX IF NOT EXISTS swachhlens_reports_priority_idx      ON swachhlens_reports(priority)`,
   `CREATE INDEX IF NOT EXISTS swachhlens_reports_zone_idx          ON swachhlens_reports(zone)`,

@@ -63,10 +63,9 @@ export default function App() {
 
 function OperatorDashboard() {
   const { profile, signOut, municipalityId } = useAuth()
-  // Non-superadmin operators start scoped to their own municipality.
-  // Superadmin (no municipality_id on profile) defaults to null → national view.
-  const isSuperadmin = !profile?.municipality_id
-  const [activeMuniId, setActiveMuniId] = useState(municipalityId || null)
+  // Super Admin has role === 'superadmin' (or operator with no assigned municipality_id)
+  const isSuperadmin = profile?.role === 'superadmin' || (!profile?.municipality_id && profile?.role !== 'worker')
+  const [activeMuniId, setActiveMuniId] = useState(isSuperadmin ? null : (municipalityId || null))
   const [reports, setReports] = useState([])
   const [workers, setWorkers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -82,8 +81,10 @@ function OperatorDashboard() {
   const [seeding, setSeeding] = useState(false)
 
   useEffect(() => {
-    setActiveMuniId(municipalityId || null)
-  }, [municipalityId])
+    if (!isSuperadmin) {
+      setActiveMuniId(municipalityId || null)
+    }
+  }, [municipalityId, isSuperadmin])
 
   const toast = useCallback((message, type = 'info') => {
     const id = Date.now() + Math.random()
@@ -207,7 +208,12 @@ function OperatorDashboard() {
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark"><Icon name="Leaf" size={20} /></div>
-          <div>SwachhLens<div className="brand-sub">Operations · {profile?.full_name}</div></div>
+          <div>
+            SwachhLens
+            <div className="brand-sub">
+              {isSuperadmin ? '👑 National Super Admin Desk' : `Operations · ${profile?.full_name || 'Operator'}`}
+            </div>
+          </div>
         </div>
         <div className="topbar-actions">
           <button className="btn btn-primary" onClick={() => setShowNew(true)}><Icon name="Plus" size={16} /> New report</button>
@@ -218,8 +224,9 @@ function OperatorDashboard() {
       {/* Municipality context bar & live switcher */}
       <MunicipalityHeader
         municipalityId={activeMuniId}
-        onSelectMunicipality={setActiveMuniId}
+        onSelectMunicipality={isSuperadmin ? setActiveMuniId : undefined}
         reports={reports}
+        isSuperadmin={isSuperadmin}
       />
 
       <div className="workspace">

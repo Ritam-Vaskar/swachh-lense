@@ -33,7 +33,7 @@ export default function AuthScreen({ onCitizen }) {
           setForm((f) => ({ ...f, municipality_id: f.municipality_id || data[0].id }))
         }
       })
-      .catch(() => {})
+      .catch(() => { })
   }, [])
 
   function update(key, value) {
@@ -112,7 +112,7 @@ export default function AuthScreen({ onCitizen }) {
 
         <form onSubmit={submit}>
           {mode === 'signup' && (
-            <div className="auth-role" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
+            <div className="auth-role" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
               <button
                 type="button"
                 className={role === 'operator' ? 'active' : ''}
@@ -133,16 +133,6 @@ export default function AuthScreen({ onCitizen }) {
                 <div style={{ fontWeight: 600, fontSize: 13 }}>Worker</div>
                 <small style={{ fontSize: 10 }}>Field Squad</small>
               </button>
-              <button
-                type="button"
-                className={role === 'superadmin' ? 'active' : ''}
-                onClick={() => setRole('superadmin')}
-                style={{ padding: '10px 8px', textAlign: 'center' }}
-              >
-                <Icon name="ShieldCheck" size={18} />
-                <div style={{ fontWeight: 600, fontSize: 13 }}>Super Admin</div>
-                <small style={{ fontSize: 10 }}>National View</small>
-              </button>
             </div>
           )}
 
@@ -158,7 +148,7 @@ export default function AuthScreen({ onCitizen }) {
             </div>
           )}
 
-          {mode === 'signup' && role !== 'superadmin' && municipalities.length > 0 && (
+          {mode === 'signup' && role === 'worker' && municipalities.length > 0 && (
             <div className="form-group">
               <label>Assigned Municipality / ULB</label>
               <select

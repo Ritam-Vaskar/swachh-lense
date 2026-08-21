@@ -3,6 +3,7 @@ import { api, REPORT_CATEGORIES, generateReferenceCode } from '../lib/api/index.
 import { uploadEvidence } from '../lib/storage'
 import { Icon, Toast } from './ui'
 import MapView from './MapView'
+import CameraCaptureModal from './CameraCaptureModal'
 import { statusColors, formatRelativeTime, getSlaStatus } from '../lib/constants'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
@@ -284,6 +285,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
 }
 
 function CaptureStep({ photoUrl, gps, gpsError, availability, description, setDescription, category, setCategory, phone, setPhone, onPhoto, onSubmit }) {
+  const [isCameraOpen, setIsCameraOpen] = useState(false)
   const isBlocked = availability?.available === false
   const isChecking = availability?.checking
 
@@ -294,20 +296,108 @@ function CaptureStep({ photoUrl, gps, gpsError, availability, description, setDe
           <div className="panel-header"><h3 className="panel-title">1. Capture the waste</h3></div>
           <div className="panel-body">
             {photoUrl ? (
-              <div className="image-placeholder"><img src={photoUrl} alt="Evidence" /></div>
+              <div>
+                <div className="image-placeholder" style={{ borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+                  <img src={photoUrl} alt="Evidence" style={{ width: '100%', maxHeight: 260, objectFit: 'cover' }} />
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setIsCameraOpen(true)}>
+                    <Icon name="Camera" size={14} /> Retake with camera
+                  </button>
+                  <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <input type="file" accept="image/*" onChange={(e) => e.target.files[0] && onPhoto(e.target.files[0])} hidden />
+                    <Icon name="UploadCloud" size={14} /> Choose another file
+                  </label>
+                </div>
+              </div>
             ) : (
-              <label className="capture-zone">
-                <input type="file" accept="image/*" capture="environment" onChange={(e) => e.target.files[0] && onPhoto(e.target.files[0])} hidden />
-                <Icon name="Camera" size={40} />
-                <h3>Take or upload a photo</h3>
-                <p className="muted">Point at the overflowing bin, dumpsite, or waste issue.</p>
-              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => setIsCameraOpen(true)}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '24px 16px',
+                    background: 'var(--surface-muted)',
+                    border: '2px dashed var(--primary)',
+                    borderRadius: 'var(--radius)',
+                    cursor: 'pointer',
+                    gap: 10,
+                    textAlign: 'center',
+                    transition: 'all var(--dur)',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--primary-soft)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--surface-muted)')}
+                >
+                  <div
+                    style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: '50%',
+                      background: 'var(--primary-soft)',
+                      color: 'var(--primary-dark)',
+                      display: 'grid',
+                      placeItems: 'center',
+                    }}
+                  >
+                    <Icon name="Camera" size={24} />
+                  </div>
+                  <div>
+                    <strong style={{ display: 'block', fontSize: 14, color: 'var(--text)' }}>Take photo</strong>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Open device camera</span>
+                  </div>
+                </button>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '24px 16px',
+                    background: 'var(--surface-muted)',
+                    border: '2px dashed var(--border-strong)',
+                    borderRadius: 'var(--radius)',
+                    cursor: 'pointer',
+                    gap: 10,
+                    textAlign: 'center',
+                    transition: 'all var(--dur)',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--surface-muted)')}
+                >
+                  <input type="file" accept="image/*" onChange={(e) => e.target.files[0] && onPhoto(e.target.files[0])} hidden />
+                  <div
+                    style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: '50%',
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--text-muted)',
+                      display: 'grid',
+                      placeItems: 'center',
+                    }}
+                  >
+                    <Icon name="UploadCloud" size={24} />
+                  </div>
+                  <div>
+                    <strong style={{ display: 'block', fontSize: 14, color: 'var(--text)' }}>Upload image</strong>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Browse files / gallery</span>
+                  </div>
+                </label>
+              </div>
             )}
-            {photoUrl && (
-              <button className="btn btn-ghost btn-sm" style={{ marginTop: 10 }} onClick={() => document.querySelector('input[type=file]').click()}>
-                <Icon name="RefreshCw" size={14} /> Retake
-              </button>
-            )}
+
+            <CameraCaptureModal
+              isOpen={isCameraOpen}
+              onClose={() => setIsCameraOpen(false)}
+              onCapture={(file) => onPhoto(file)}
+              title="Take waste evidence photo"
+            />
           </div>
         </div>
 

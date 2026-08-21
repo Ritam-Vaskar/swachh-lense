@@ -5,6 +5,7 @@ import { uploadEvidence } from '../lib/storage'
 import { Icon, Toast } from './ui'
 import MapView from './MapView'
 import WorkerNavigationModal from './WorkerNavigationModal'
+import CameraCaptureModal from './CameraCaptureModal'
 import { statusColors, priorityColors, formatDate, getSlaStatus } from '../lib/constants'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
@@ -413,6 +414,7 @@ function TaskDrawer({ task, onClose, onStatus, onStartNavigation, onCompleted, t
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState(null)
   const [submitting, setSubmitting] = useState(false)
+  const [isCameraOpen, setIsCameraOpen] = useState(false)
   const report = task.report
 
   function handlePhoto(file) {
@@ -517,21 +519,76 @@ function TaskDrawer({ task, onClose, onStatus, onStartNavigation, onCompleted, t
                 {afterUrl ? (
                   <div className="image-placeholder" style={{ position: 'relative' }}>
                     <img src={afterUrl} alt="After" />
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.5)', color: '#fff' }}
-                      onClick={() => { setAfterPhoto(null); setAfterUrl(null); setVerifyResult(null) }}
-                    >
-                      <Icon name="X" size={12} /> Re-upload
-                    </button>
+                    <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 6 }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}
+                        onClick={() => setIsCameraOpen(true)}
+                      >
+                        <Icon name="Camera" size={12} /> Retake
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}
+                        onClick={() => { setAfterPhoto(null); setAfterUrl(null); setVerifyResult(null) }}
+                      >
+                        <Icon name="X" size={12} />
+                      </button>
+                    </div>
                   </div>
                 ) : (
-                  <label className="capture-zone small">
-                    <input type="file" accept="image/*" capture="environment" onChange={(e) => e.target.files[0] && handlePhoto(e.target.files[0])} hidden />
-                    <Icon name="Camera" size={28} />
-                    <span>Take after photo</span>
-                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsCameraOpen(true)}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '16px 12px',
+                        background: 'var(--surface-muted)',
+                        border: '2px dashed var(--primary)',
+                        borderRadius: 'var(--radius-sm)',
+                        cursor: 'pointer',
+                        gap: 6,
+                        textAlign: 'center',
+                      }}
+                    >
+                      <Icon name="Camera" size={24} color="var(--primary)" />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Take photo</span>
+                    </button>
+
+                    <label
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '16px 12px',
+                        background: 'var(--surface-muted)',
+                        border: '2px dashed var(--border-strong)',
+                        borderRadius: 'var(--radius-sm)',
+                        cursor: 'pointer',
+                        gap: 6,
+                        textAlign: 'center',
+                      }}
+                    >
+                      <input type="file" accept="image/*" onChange={(e) => e.target.files[0] && handlePhoto(e.target.files[0])} hidden />
+                      <Icon name="UploadCloud" size={24} color="var(--text-muted)" />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Upload file</span>
+                    </label>
+                  </div>
                 )}
+
+                <CameraCaptureModal
+                  isOpen={isCameraOpen}
+                  onClose={() => setIsCameraOpen(false)}
+                  onCapture={(file) => handlePhoto(file)}
+                  title="Take After Cleanup Photo"
+                />
               </div>
 
               <div className="form-group">

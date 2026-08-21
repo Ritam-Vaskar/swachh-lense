@@ -1,6 +1,8 @@
 import { generateReferenceCode, generateTaskCode } from './constants.js'
 
-const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || 'http://localhost:3001'
+const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL)
+  ? import.meta.env.VITE_API_BASE_URL
+  : (typeof import.meta !== 'undefined' && import.meta.env?.PROD ? '' : 'http://localhost:3001')
 const SESSION_KEY = 'swachhlens-session-v1'
 const authListeners = new Set()
 const channelListeners = new Set()

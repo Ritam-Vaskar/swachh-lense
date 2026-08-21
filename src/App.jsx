@@ -9,6 +9,7 @@ import AuthScreen from './components/AuthScreen'
 import CitizenPortal from './components/CitizenPortal'
 import WorkerDashboard from './components/WorkerDashboard'
 import MapView from './components/MapView'
+import MunicipalityHeader from './components/MunicipalityHeader'
 import {
   statusColors,
   priorityColors,
@@ -61,7 +62,10 @@ export default function App() {
 }
 
 function OperatorDashboard() {
-  const { profile, signOut } = useAuth()
+  const { profile, signOut, municipalityId } = useAuth()
+  // Super Admin has role === 'superadmin' (or operator with no assigned municipality_id)
+  const isSuperadmin = profile?.role === 'superadmin' || (!profile?.municipality_id && profile?.role !== 'worker')
+  const [activeMuniId, setActiveMuniId] = useState(isSuperadmin ? null : (municipalityId || null))
   const [reports, setReports] = useState([])
   const [workers, setWorkers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -76,6 +80,12 @@ function OperatorDashboard() {
   const [toasts, setToasts] = useState([])
   const [seeding, setSeeding] = useState(false)
 
+  useEffect(() => {
+    if (!isSuperadmin) {
+      setActiveMuniId(municipalityId || null)
+    }
+  }, [municipalityId, isSuperadmin])
+
   const toast = useCallback((message, type = 'info') => {
     const id = Date.now() + Math.random()
     setToasts((t) => [...t, { id, message, type }])
@@ -84,16 +94,22 @@ function OperatorDashboard() {
 
   const loadReports = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await api.from('swachhlens_reports').select('*').order('reported_at', { ascending: false })
+    // Operators see only their municipality's reports; superadmin / national view (no activeMuniId) sees all
+    let query = api.from('swachhlens_reports').select('*').order('reported_at', { ascending: false })
+    if (activeMuniId) query = query.eq('municipality_id', activeMuniId)
+    const { data, error } = await query
     if (error) toast('Could not load reports.', 'error')
     else setReports(data || [])
     setLoading(false)
-  }, [toast])
+  }, [toast, activeMuniId])
 
   const loadWorkers = useCallback(async () => {
-    const { data } = await api.from('profiles').select('*').eq('role', 'worker')
+    // Workers are also scoped to municipality when activeMuniId is set
+    let query = api.from('profiles').select('*').eq('role', 'worker')
+    if (activeMuniId) query = query.eq('municipality_id', activeMuniId)
+    const { data } = await query
     setWorkers(data || [])
-  }, [])
+  }, [activeMuniId])
 
   useEffect(() => {
     ;(async () => {
@@ -107,13 +123,16 @@ function OperatorDashboard() {
       await loadWorkers()
     })()
 
-    // Realtime subscriptions
+    // Realtime subscriptions — INSERT events are filtered client-side by municipality
     const reportSub = api
-      .channel('reports-rt')
+      .channel(`reports-rt-${activeMuniId || 'all'}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'swachhlens_reports' }, (payload) => {
         if (payload.eventType === 'INSERT' && payload.new?.id) {
-          setReports((r) => [payload.new, ...r])
-          toast('New report received from citizen.', 'success')
+          // Only add to state if it belongs to this active municipality (or unscoped)
+          if (!activeMuniId || payload.new.municipality_id === activeMuniId) {
+            setReports((r) => [payload.new, ...r])
+            toast('New report received from citizen.', 'success')
+          }
         } else if (payload.eventType === 'UPDATE' && payload.new?.id) {
           setReports((r) => r.map((x) => (x.id === payload.new.id ? { ...x, ...payload.new } : x)))
         } else if (payload.eventType === 'DELETE' && payload.old?.id) {
@@ -123,7 +142,7 @@ function OperatorDashboard() {
       .subscribe()
 
     return () => api.removeChannel(reportSub)
-  }, [loadReports, loadWorkers, toast])
+  }, [loadReports, loadWorkers, toast, activeMuniId])
 
   function handleChanged(updated) {
     setReports((list) => list.map((r) => (r.id === updated.id ? updated : r)))
@@ -189,14 +208,26 @@ function OperatorDashboard() {
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark"><Icon name="Leaf" size={20} /></div>
-          <div>SwachhLens<div className="brand-sub">Operations · {profile?.full_name}</div></div>
+          <div>
+            SwachhLens
+            <div className="brand-sub">
+              {isSuperadmin ? '👑 National Super Admin Desk' : `Operations · ${profile?.full_name || 'Operator'}`}
+            </div>
+          </div>
         </div>
         <div className="topbar-actions">
-          <span className="live-pill"><span className="live-dot" /> Live</span>
           <button className="btn btn-primary" onClick={() => setShowNew(true)}><Icon name="Plus" size={16} /> New report</button>
           <button className="btn btn-ghost btn-sm" onClick={() => signOut()}><Icon name="LogOut" size={14} /> Sign out</button>
         </div>
       </header>
+
+      {/* Municipality context bar & live switcher */}
+      <MunicipalityHeader
+        municipalityId={activeMuniId}
+        onSelectMunicipality={isSuperadmin ? setActiveMuniId : undefined}
+        reports={reports}
+        isSuperadmin={isSuperadmin}
+      />
 
       <div className="workspace">
         <aside className="sidebar">
@@ -225,9 +256,15 @@ function OperatorDashboard() {
           {view === 'map' ? (
             <MapDashboard reports={reports} workers={workers} onSelect={setSelected} selectedId={selected?.id} />
           ) : view === 'analytics' ? (
-            <AnalyticsView reports={reports} />
+            <AnalyticsView reports={reports} activeMuniId={activeMuniId} onSelectMunicipality={isSuperadmin ? setActiveMuniId : undefined} />
           ) : (
             <>
+              {!activeMuniId && (
+                <div className="national-banner">
+                  <Icon name="Globe" size={14} />
+                  <span>National overview — showing reports from <strong>all municipalities</strong>. Select a municipality above to scope your view.</span>
+                </div>
+              )}
               <div className="kpi-grid">
                 <KpiCard icon="Inbox" label="Total reports" value={kpis.total} trend={`${kpis.active} active`} />
                 <KpiCard icon="ClipboardCheck" label="Pending approval" value={kpis.pending} tone="warning" trend="awaiting review" />
@@ -331,7 +368,7 @@ function OperatorDashboard() {
         </main>
       </div>
 
-      <NewReportModal open={showNew} onClose={() => setShowNew(false)} onCreated={handleCreated} />
+      <NewReportModal open={showNew} onClose={() => setShowNew(false)} onCreated={handleCreated} municipalityId={activeMuniId} />
       <ReportDrawer report={selected} onClose={() => setSelected(null)} onChanged={handleChanged} toast={toast} />
 
       <div className="toast-container">
@@ -345,6 +382,14 @@ function MapDashboard({ reports, workers, onSelect, selectedId }) {
   const geoReports = reports.filter((r) => r.latitude != null)
   const [mapView, setMapView] = useState('all')
   const shown = mapView === 'pending' ? geoReports.filter((r) => r.approval_status === 'Pending') : geoReports
+
+  // Derive map center from visible reports — auto-follows whichever municipality is active
+  const mapCenter = useMemo(() => {
+    if (geoReports.length === 0) return [20.5937, 78.9629] // India center fallback
+    const avgLat = geoReports.reduce((s, r) => s + r.latitude, 0) / geoReports.length
+    const avgLng = geoReports.reduce((s, r) => s + r.longitude, 0) / geoReports.length
+    return [avgLat, avgLng]
+  }, [geoReports])
 
   return (
     <>
@@ -360,7 +405,7 @@ function MapDashboard({ reports, workers, onSelect, selectedId }) {
           </div>
         </div>
         <div className="panel-body">
-          <MapView reports={shown} workers={workers} center={[12.9716, 77.5946]} zoom={12} height={520} showWorkers onMarkerClick={onSelect} selectedId={selectedId} />
+          <MapView reports={shown} workers={workers} center={mapCenter} zoom={12} height={520} showWorkers onMarkerClick={onSelect} selectedId={selectedId} />
         </div>
       </div>
       <div className="panel">
@@ -401,7 +446,28 @@ function KpiCard({ icon, label, value, trend, tone = 'primary' }) {
   )
 }
 
-function AnalyticsView({ reports }) {
+const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || 'http://localhost:3001'
+
+const MUNI_PALETTE = ['#6366f1','#0ea5e9','#8b5cf6','#f59e0b','#14b8a6','#ec4899','#22c55e','#f97316']
+function muniColor(slug = '') {
+  let h = 0
+  for (let i = 0; i < slug.length; i++) h = (h * 31 + slug.charCodeAt(i)) & 0xffff
+  return MUNI_PALETTE[h % MUNI_PALETTE.length]
+}
+
+function AnalyticsView({ reports, activeMuniId, onSelectMunicipality }) {
+  const [muniStats, setMuniStats] = useState([])
+  const [muniLoading, setMuniLoading] = useState(true)
+
+  useEffect(() => {
+    setMuniLoading(true)
+    fetch(`${API_BASE}/api/municipalities/stats`)
+      .then((r) => r.json())
+      .then(({ data }) => setMuniStats(data || []))
+      .catch(() => setMuniStats([]))
+      .finally(() => setMuniLoading(false))
+  }, [])
+
   const byCategory = useMemo(() => {
     const map = {}
     reports.forEach((r) => { map[r.category] = (map[r.category] || 0) + 1 })
@@ -429,6 +495,60 @@ function AnalyticsView({ reports }) {
         <KpiCard icon="Copy" label="Duplicate clusters" value={reports.filter((r) => r.duplicate_count > 1).length} trend="merged" />
         <KpiCard icon="ShieldCheck" label="Verified" value={byStatus['Closed'] || 0} trend="audit ready" />
       </div>
+
+      {/* Municipality breakdown — only visible to superadmin (all municipalities shown) */}
+      <div className="panel">
+        <div className="panel-header">
+          <h3 className="panel-title">Municipality breakdown</h3>
+          <div className="panel-sub">Click a city to scope your dashboard</div>
+        </div>
+        <div className="panel-body">
+          {muniLoading ? (
+            <div className="spinner-wrap" style={{ padding: '20px 0' }}><div className="spinner" /></div>
+          ) : muniStats.length === 0 ? (
+            <p className="muted">No municipality data available.</p>
+          ) : (
+            <div className="muni-breakdown-grid">
+              {muniStats.map((m) => {
+                const color = muniColor(m.slug)
+                const isActive = activeMuniId === m.id
+                return (
+                  <div
+                    key={m.id}
+                    id={`muni-card-${m.slug}`}
+                    className={`muni-breakdown-card ${isActive ? 'active' : ''}`}
+                    style={{ '--mbc': color, cursor: onSelectMunicipality ? 'pointer' : 'default' }}
+                    onClick={() => onSelectMunicipality && onSelectMunicipality(m.id === activeMuniId ? null : m.id)}
+                  >
+                    <div className="mbc-header" style={{ borderLeft: `3px solid ${color}` }}>
+                      <span className="mbc-dot" style={{ background: color }} />
+                      <div>
+                        <div className="mbc-name">{m.name}</div>
+                        <div className="mbc-geo">{m.city} · {m.state}</div>
+                      </div>
+                      {isActive && <span className="mbc-active-pill">Active</span>}
+                    </div>
+                    <div className="mbc-stats">
+                      <div className="mbc-stat"><span className="mbc-val">{m.total}</span><span className="mbc-lbl">Total</span></div>
+                      <div className="mbc-stat"><span className="mbc-val" style={{ color }}>{m.active}</span><span className="mbc-lbl">Active</span></div>
+                      <div className="mbc-stat"><span className="mbc-val" style={{ color: '#ef4444' }}>{m.critical}</span><span className="mbc-lbl">Critical</span></div>
+                      <div className="mbc-stat"><span className="mbc-val" style={{ color: '#f59e0b' }}>{m.pending}</span><span className="mbc-lbl">Pending</span></div>
+                      <div className="mbc-stat"><span className="mbc-val" style={{ color: '#16a34a' }}>{m.resolved}</span><span className="mbc-lbl">Resolved</span></div>
+                    </div>
+                    <div className="mbc-bar">
+                      <div className="mbc-bar-fill" style={{ width: `${m.total > 0 ? Math.round((m.resolved / m.total) * 100) : 0}%`, background: color }} />
+                    </div>
+                    <div className="mbc-rate muted" style={{ fontSize: 11, marginTop: 4 }}>
+                      Resolution rate: {m.total > 0 ? Math.round((m.resolved / m.total) * 100) : 0}%
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="panel">
         <div className="panel-header"><h3 className="panel-title">Reports by category</h3></div>
         <div className="panel-body">

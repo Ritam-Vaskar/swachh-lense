@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, REPORT_CATEGORIES, ZONES, VOLUME_LEVELS } from '../lib/api/index.js'
 import { uploadEvidence } from '../lib/storage'
 import { Icon } from './ui'
+import CameraCaptureModal from './CameraCaptureModal'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
 
@@ -16,7 +17,7 @@ async function callIntakeAgent(payload) {
   return data
 }
 
-export default function NewReportModal({ open, onClose, onCreated }) {
+export default function NewReportModal({ open, onClose, onCreated, municipalityId = null }) {
   const [form, setForm] = useState({
     category: REPORT_CATEGORIES[0],
     location: '',
@@ -110,6 +111,7 @@ export default function NewReportModal({ open, onClose, onCreated }) {
         citizen_phone: form.phone,
         image_url: imageUrl,
         source: 'operator',
+        municipality_id: municipalityId || null,
       })
       setPipelineStatus('done')
       setSaving(false)
@@ -125,13 +127,14 @@ export default function NewReportModal({ open, onClose, onCreated }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ width: 600 }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal" style={{ maxWidth: 580 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3 style={{ margin: 0, fontSize: 18 }}>New civic report</h3>
-          <p className="muted" style={{ margin: '4px 0 0', fontSize: 13 }}>Intake a waste complaint into the operations workspace.</p>
+          <h2 style={{ margin: 0, fontSize: 18 }}>Create Waste Report</h2>
         </div>
         <form onSubmit={submit}>
           <div className="modal-body">
+            {error && <div className="auth-error" style={{ marginBottom: 14 }}>{error}</div>}
+
             <div className="form-row">
               <div className="form-group">
                 <label>Category</label>
@@ -146,6 +149,7 @@ export default function NewReportModal({ open, onClose, onCreated }) {
                 </select>
               </div>
             </div>
+
             <div className="form-group">
               <label>Location details</label>
               <input value={form.location} onChange={(e) => update('location', e.target.value)} placeholder="Landmark, street, cross reference" />
@@ -170,14 +174,73 @@ export default function NewReportModal({ open, onClose, onCreated }) {
             <div className="form-group">
               <label>Evidence photo (optional)</label>
               {photoUrl ? (
-                <div className="image-placeholder" style={{ height: 160 }}><img src={photoUrl} alt="Evidence" /></div>
+                <div className="image-placeholder" style={{ height: 160, position: 'relative', overflow: 'hidden' }}>
+                  <img src={photoUrl} alt="Evidence" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 6 }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}
+                      onClick={() => setIsCameraOpen(true)}
+                    >
+                      <Icon name="Camera" size={12} /> Retake
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}
+                      onClick={() => { setPhoto(null); setPhotoUrl(null) }}
+                    >
+                      <Icon name="X" size={12} />
+                    </button>
+                  </div>
+                </div>
               ) : (
-                <label className="capture-zone small">
-                  <input type="file" accept="image/*" capture="environment" onChange={(e) => e.target.files[0] && handlePhoto(e.target.files[0])} hidden />
-                  <Icon name="Camera" size={24} />
-                  <span>Upload or take photo</span>
-                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsCameraOpen(true)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '14px 10px',
+                      background: 'var(--surface-muted)',
+                      border: '2px dashed var(--primary)',
+                      borderRadius: 'var(--radius-sm)',
+                      cursor: 'pointer',
+                      gap: 8,
+                    }}
+                  >
+                    <Icon name="Camera" size={20} color="var(--primary)" />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Take photo</span>
+                  </button>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '14px 10px',
+                      background: 'var(--surface-muted)',
+                      border: '2px dashed var(--border-strong)',
+                      borderRadius: 'var(--radius-sm)',
+                      cursor: 'pointer',
+                      gap: 8,
+                    }}
+                  >
+                    <input type="file" accept="image/*" onChange={(e) => e.target.files[0] && handlePhoto(e.target.files[0])} hidden />
+                    <Icon name="UploadCloud" size={20} color="var(--text-muted)" />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Upload file</span>
+                  </label>
+                </div>
               )}
+
+              <CameraCaptureModal
+                isOpen={isCameraOpen}
+                onClose={() => setIsCameraOpen(false)}
+                onCapture={(file) => handlePhoto(file)}
+                title="Take Evidence Photo"
+              />
             </div>
 
             <div className="toggle-row">

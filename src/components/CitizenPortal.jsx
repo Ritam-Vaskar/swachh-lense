@@ -3,6 +3,7 @@ import { api, REPORT_CATEGORIES, generateReferenceCode } from '../lib/api/index.
 import { uploadEvidence } from '../lib/storage'
 import { Icon, Toast } from './ui'
 import MapView from './MapView'
+import CameraCaptureModal from './CameraCaptureModal'
 import { statusColors, formatRelativeTime, getSlaStatus } from '../lib/constants'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
@@ -26,6 +27,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
   const [photoUrl, setPhotoUrl] = useState(null)
   const [gps, setGps] = useState(null)
   const [gpsError, setGpsError] = useState('')
+  const [availability, setAvailability] = useState({ checking: false, available: null, reason: '', message: '', municipality: null })
   const [description, setDescription] = useState('')
   const [category, setCategory] = useState('')
   const [phone, setPhone] = useState('')
@@ -41,10 +43,52 @@ export default function CitizenPortal({ onBackToSignIn }) {
     setTimeout(() => setToast(null), 3000)
   }
 
+  async function checkAvailability(lat, lng) {
+    setAvailability({ checking: true, available: null, reason: '', message: '', municipality: null })
+    try {
+      const res = await fetch(`${API_BASE}/api/municipalities/check-availability`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ latitude: lat, longitude: lng }),
+      })
+      const data = await res.json()
+      if (res.ok && data.available) {
+        setAvailability({
+          checking: false,
+          available: true,
+          reason: '',
+          message: `Service active in ${data.municipality?.name || 'your area'}`,
+          municipality: data.municipality,
+        })
+      } else {
+        setAvailability({
+          checking: false,
+          available: false,
+          reason: data.reason || 'UNAVAILABLE',
+          message: data.message || 'This service is not available in your municipal area yet.',
+          municipality: data.municipality || null,
+        })
+      }
+    } catch {
+      setAvailability({
+        checking: false,
+        available: false,
+        reason: 'NETWORK_ERROR',
+        message: 'Could not connect to service availability checker.',
+        municipality: null,
+      })
+    }
+  }
+
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => setGps({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+        (pos) => {
+          const lat = pos.coords.latitude
+          const lng = pos.coords.longitude
+          setGps({ lat, lng, accuracy: pos.coords.accuracy })
+          checkAvailability(lat, lng)
+        },
         (err) => setGpsError(err.message || 'Location permission denied'),
         { enableHighAccuracy: true, timeout: 10000 },
       )
@@ -74,6 +118,11 @@ export default function CitizenPortal({ onBackToSignIn }) {
 
   async function submitReport() {
     if (!photo) return
+    if (availability.available === false) {
+      showToast(availability.message || 'Service is not available in this area.', 'error')
+      return
+    }
+
     setStep('analyzing') // reusing analyzing card for unified step
 
     let urlToUse = uploadedImageUrl
@@ -108,7 +157,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
 
       setStep('submitting')
 
-      // 3. Submit directly to DB
+      // 3. Submit directly to DB (with full backend double-validation)
       const result = await callIntakeAgent({
         category: data.analysis.category || category || '',
         location: gps ? `GPS ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : '',
@@ -175,6 +224,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
                 photoUrl={photoUrl}
                 gps={gps}
                 gpsError={gpsError}
+                availability={availability}
                 description={description}
                 setDescription={setDescription}
                 category={category}
@@ -234,7 +284,11 @@ export default function CitizenPortal({ onBackToSignIn }) {
   )
 }
 
-function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, category, setCategory, phone, setPhone, onPhoto, onSubmit }) {
+function CaptureStep({ photoUrl, gps, gpsError, availability, description, setDescription, category, setCategory, phone, setPhone, onPhoto, onSubmit }) {
+  const [isCameraOpen, setIsCameraOpen] = useState(false)
+  const isBlocked = availability?.available === false
+  const isChecking = availability?.checking
+
   return (
     <div className="capture-grid">
       <div className="capture-left">
@@ -242,20 +296,108 @@ function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, cat
           <div className="panel-header"><h3 className="panel-title">1. Capture the waste</h3></div>
           <div className="panel-body">
             {photoUrl ? (
-              <div className="image-placeholder"><img src={photoUrl} alt="Evidence" /></div>
+              <div>
+                <div className="image-placeholder" style={{ borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+                  <img src={photoUrl} alt="Evidence" style={{ width: '100%', maxHeight: 260, objectFit: 'cover' }} />
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setIsCameraOpen(true)}>
+                    <Icon name="Camera" size={14} /> Retake with camera
+                  </button>
+                  <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <input type="file" accept="image/*" onChange={(e) => e.target.files[0] && onPhoto(e.target.files[0])} hidden />
+                    <Icon name="UploadCloud" size={14} /> Choose another file
+                  </label>
+                </div>
+              </div>
             ) : (
-              <label className="capture-zone">
-                <input type="file" accept="image/*" capture="environment" onChange={(e) => e.target.files[0] && onPhoto(e.target.files[0])} hidden />
-                <Icon name="Camera" size={40} />
-                <h3>Take or upload a photo</h3>
-                <p className="muted">Point at the overflowing bin, dumpsite, or waste issue.</p>
-              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => setIsCameraOpen(true)}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '24px 16px',
+                    background: 'var(--surface-muted)',
+                    border: '2px dashed var(--primary)',
+                    borderRadius: 'var(--radius)',
+                    cursor: 'pointer',
+                    gap: 10,
+                    textAlign: 'center',
+                    transition: 'all var(--dur)',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--primary-soft)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--surface-muted)')}
+                >
+                  <div
+                    style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: '50%',
+                      background: 'var(--primary-soft)',
+                      color: 'var(--primary-dark)',
+                      display: 'grid',
+                      placeItems: 'center',
+                    }}
+                  >
+                    <Icon name="Camera" size={24} />
+                  </div>
+                  <div>
+                    <strong style={{ display: 'block', fontSize: 14, color: 'var(--text)' }}>Take photo</strong>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Open device camera</span>
+                  </div>
+                </button>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '24px 16px',
+                    background: 'var(--surface-muted)',
+                    border: '2px dashed var(--border-strong)',
+                    borderRadius: 'var(--radius)',
+                    cursor: 'pointer',
+                    gap: 10,
+                    textAlign: 'center',
+                    transition: 'all var(--dur)',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--surface-muted)')}
+                >
+                  <input type="file" accept="image/*" onChange={(e) => e.target.files[0] && onPhoto(e.target.files[0])} hidden />
+                  <div
+                    style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: '50%',
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--text-muted)',
+                      display: 'grid',
+                      placeItems: 'center',
+                    }}
+                  >
+                    <Icon name="UploadCloud" size={24} />
+                  </div>
+                  <div>
+                    <strong style={{ display: 'block', fontSize: 14, color: 'var(--text)' }}>Upload image</strong>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Browse files / gallery</span>
+                  </div>
+                </label>
+              </div>
             )}
-            {photoUrl && (
-              <button className="btn btn-ghost btn-sm" style={{ marginTop: 10 }} onClick={() => document.querySelector('input[type=file]').click()}>
-                <Icon name="RefreshCw" size={14} /> Retake
-              </button>
-            )}
+
+            <CameraCaptureModal
+              isOpen={isCameraOpen}
+              onClose={() => setIsCameraOpen(false)}
+              onCapture={(file) => onPhoto(file)}
+              title="Take waste evidence photo"
+            />
           </div>
         </div>
 
@@ -286,7 +428,7 @@ function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, cat
               ) : gpsError ? (
                 <>
                   <Icon name="MapPinOff" size={16} color="#ef4444" />
-                  <span>{gpsError} — you can still submit without GPS.</span>
+                  <span>{gpsError}</span>
                 </>
               ) : (
                 <>
@@ -295,6 +437,31 @@ function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, cat
                 </>
               )}
             </div>
+
+            {/* Rapido-Style Service Availability Banner */}
+            {isChecking && (
+              <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: 'var(--surface-muted)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="spinner" style={{ width: 14, height: 14 }} />
+                <span>Checking service coverage in your area…</span>
+              </div>
+            )}
+
+            {availability?.available === true && (
+              <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: '#dcfce7', border: '1px solid #86efac', color: '#15803d', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon name="CheckCircle2" size={18} color="#15803d" />
+                <span><strong>Service Active:</strong> Covered by {availability.municipality?.name} · Active crew on standby</span>
+              </div>
+            )}
+
+            {availability?.available === false && (
+              <div style={{ marginTop: 12, padding: '12px 14px', borderRadius: 8, background: '#fee2e2', border: '1px solid #fca5a5', color: '#b91c1c', fontSize: 13, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                <Icon name="AlertTriangle" size={18} color="#b91c1c" style={{ flexShrink: 0, marginTop: 2 }} />
+                <div>
+                  <strong>{availability.reason === 'NO_WORKER_AVAILABLE' ? 'Crew Unavailable' : 'Service Unavailable'}</strong>
+                  <div style={{ marginTop: 2 }}>{availability.message}</div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -312,8 +479,26 @@ function CaptureStep({ photoUrl, gps, gpsError, description, setDescription, cat
             )}
             
             {photoUrl && (
-              <button className="btn btn-primary" style={{ width: '100%', marginTop: 20, padding: 14, fontSize: 16 }} onClick={onSubmit}>
-                <Icon name="Sparkles" size={16} /> Analyze &amp; Submit
+              <button
+                className={`btn ${isBlocked ? 'btn-ghost' : 'btn-primary'}`}
+                style={{
+                  width: '100%',
+                  marginTop: 20,
+                  padding: 14,
+                  fontSize: 16,
+                  cursor: isBlocked || isChecking ? 'not-allowed' : 'pointer',
+                  opacity: isBlocked ? 0.6 : 1,
+                }}
+                onClick={isBlocked ? undefined : onSubmit}
+                disabled={isBlocked || isChecking}
+              >
+                {isChecking ? (
+                  <>Checking coverage…</>
+                ) : isBlocked ? (
+                  <><Icon name="AlertCircle" size={16} /> {availability.reason === 'NO_WORKER_AVAILABLE' ? 'No crew available' : 'Service unavailable in area'}</>
+                ) : (
+                  <><Icon name="Sparkles" size={16} /> Analyze &amp; Submit</>
+                )}
               </button>
             )}
           </div>

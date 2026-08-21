@@ -4,6 +4,8 @@ import { useAuth } from '../lib/auth'
 import { uploadEvidence } from '../lib/storage'
 import { Icon, Toast } from './ui'
 import MapView from './MapView'
+import WorkerNavigationModal from './WorkerNavigationModal'
+import CameraCaptureModal from './CameraCaptureModal'
 import { statusColors, priorityColors, formatDate, getSlaStatus } from '../lib/constants'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
@@ -132,60 +134,95 @@ function VerificationModal({ result, beforeUrl, afterUrl, onRetry, onConfirm, su
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function WorkerDashboard({ onSignOut }) {
-  const { profile, signOut } = useAuth()
+  const { profile, signOut, updateLocation } = useAuth()
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
   const [toast, setToast] = useState(null)
   const [view, setView] = useState('list')
+  const [navTask, setNavTask] = useState(null)
+  const [gpsStatus, setGpsStatus] = useState('detecting')
+  const [gpsAccuracy, setGpsAccuracy] = useState(null)
 
   function showToast(message, type = 'info') {
     setToast({ message, type })
     setTimeout(() => setToast(null), 3500)
   }
 
+  const profileId = profile?.id
+  const hasLocatedRef = useRef(false)
+
   const loadTasks = useCallback(async () => {
-    if (!profile) return
+    if (!profileId) return
     setLoading(true)
     const { data } = await api
       .from('swachhlens_tasks')
       .select('*, report:swachhlens_reports(*)')
-      .eq('worker_id', profile.id)
+      .eq('worker_id', profileId)
       .order('created_at', { ascending: false })
     setTasks(data || [])
     setLoading(false)
-  }, [profile])
+  }, [profileId])
 
   useEffect(() => {
+    if (!profileId) return
     loadTasks()
     const sub = api
       .channel('worker-tasks')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'swachhlens_tasks', filter: `worker_id=eq.${profile?.id}` }, () => loadTasks())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'swachhlens_tasks', filter: `worker_id=eq.${profileId}` }, () => loadTasks())
       .subscribe()
     return () => api.removeChannel(sub)
-  }, [loadTasks, profile])
+  }, [loadTasks, profileId])
 
-  // Live GPS tracking
-  useEffect(() => {
-    if (!profile) return
-    if (navigator.geolocation) {
-      const watcher = navigator.geolocation.watchPosition(
-        (pos) => {
-          api.from('profiles').update({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }).eq('id', profile.id).then(() => {})
-        },
-        () => {},
-        { enableHighAccuracy: true, maximumAge: 30000 },
-      )
-      return () => navigator.geolocation.clearWatch(watcher)
+  // Fetch device GPS location ONCE on login/mount
+  const syncGps = useCallback(() => {
+    if (!navigator.geolocation) {
+      setGpsStatus('unsupported')
+      return
     }
-  }, [profile])
+    setGpsStatus('detecting')
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords
+        updateLocation(latitude, longitude)
+        setGpsAccuracy(Math.round(accuracy))
+        setGpsStatus('live')
+      },
+      (err) => {
+        console.warn('[WorkerDashboard] GPS position unavailable:', err?.message || err)
+        setGpsStatus('denied')
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 },
+    )
+  }, [updateLocation])
+
+  useEffect(() => {
+    if (!profileId || hasLocatedRef.current) return
+    hasLocatedRef.current = true
+    syncGps()
+  }, [profileId, syncGps])
 
   async function updateTaskStatus(task, status) {
     const { error } = await api.from('swachhlens_tasks').update({ status, updated_at: new Date().toISOString() }).eq('id', task.id)
     if (error) { showToast('Could not update status.', 'error'); return }
     setTasks((t) => t.map((x) => (x.id === task.id ? { ...x, status } : x)))
     setSelected((s) => s ? { ...s, status } : s)
+    setNavTask((n) => n && n.id === task.id ? { ...n, status } : n)
     showToast(`Task marked ${status}.`, 'success')
+  }
+
+  async function handleStartNavigation(task) {
+    // Mark En route first, then open live navigation
+    await updateTaskStatus(task, 'En route')
+    setNavTask({ ...task, status: 'En route' })
+    setSelected(null)
+  }
+
+  async function handleArrivedOnSite() {
+    if (!navTask) return
+    await updateTaskStatus(navTask, 'On site')
+    setNavTask(null)
+    showToast('Marked On Site. You can now submit cleanup evidence.', 'success')
   }
 
   function handleTaskCompleted(updatedTask) {
@@ -207,6 +244,20 @@ export default function WorkerDashboard({ onSignOut }) {
         <div className="worker-header-info">
           <span className="worker-name"><Icon name="User" size={15} /> {profile?.full_name}</span>
           <span className="tag">{profile?.zone} zone</span>
+          <button
+            type="button"
+            className={`live-pill ${gpsStatus === 'live' ? '' : 'busy'}`}
+            style={{ cursor: 'pointer', border: 'none' }}
+            onClick={syncGps}
+            title={gpsStatus === 'live' ? `Live GPS Active: ${profile?.latitude?.toFixed(4)}, ${profile?.longitude?.toFixed(4)} (±${gpsAccuracy || 10}m). Click to re-sync.` : 'Click to acquire live GPS'}
+          >
+            <span className="live-dot" style={{ background: gpsStatus === 'live' ? '#16a34a' : '#f59e0b' }} />
+            {gpsStatus === 'live' && profile?.latitude != null
+              ? `GPS: ${profile.latitude.toFixed(3)}, ${profile.longitude?.toFixed(3)}`
+              : gpsStatus === 'detecting'
+              ? 'Locating…'
+              : 'GPS Offline'}
+          </button>
           <span className={`live-pill ${profile?.is_available ? '' : 'busy'}`}>
             <span className="live-dot" style={{ background: profile?.is_available ? '#16a34a' : '#94a3b8' }} />
             {profile?.is_available ? 'Available' : 'Busy'}
@@ -259,7 +310,7 @@ export default function WorkerDashboard({ onSignOut }) {
             ) : (
               <div className="task-cards">
                 {active.map((t) => (
-                  <TaskCard key={t.id} task={t} onClick={() => setSelected(t)} onStatus={(s) => updateTaskStatus(t, s)} />
+                  <TaskCard key={t.id} task={t} onClick={() => setSelected(t)} onStatus={(s) => updateTaskStatus(t, s)} onNavigate={() => handleStartNavigation(t)} />
                 ))}
               </div>
             )}
@@ -283,8 +334,19 @@ export default function WorkerDashboard({ onSignOut }) {
           task={selected}
           onClose={() => setSelected(null)}
           onStatus={(s) => updateTaskStatus(selected, s)}
+          onStartNavigation={() => handleStartNavigation(selected)}
           onCompleted={handleTaskCompleted}
           toast={showToast}
+        />
+      )}
+
+      {navTask && (
+        <WorkerNavigationModal
+          task={navTask}
+          workerProfile={profile}
+          onClose={() => setNavTask(null)}
+          onArrivedOnSite={handleArrivedOnSite}
+          onGpsUpdate={updateLocation}
         />
       )}
 
@@ -294,7 +356,7 @@ export default function WorkerDashboard({ onSignOut }) {
 }
 
 // ─── TaskCard ─────────────────────────────────────────────────────────────────
-function TaskCard({ task, onClick, onStatus, completed }) {
+function TaskCard({ task, onClick, onStatus, onNavigate, completed }) {
   const report = task.report
   const sla = report ? getSlaStatus(report) : null
   return (
@@ -323,8 +385,21 @@ function TaskCard({ task, onClick, onStatus, completed }) {
         </>
       )}
       {!completed && task.status === 'Assigned' && (
-        <button className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }} onClick={(e) => { e.stopPropagation(); onStatus('En route') }}>
+        <button
+          className="btn btn-primary btn-sm"
+          style={{ marginTop: 10, width: '100%' }}
+          onClick={(e) => { e.stopPropagation(); onNavigate ? onNavigate() : onClick() }}
+        >
           <Icon name="Navigation" size={14} /> Start navigation
+        </button>
+      )}
+      {!completed && task.status === 'En route' && (
+        <button
+          className="btn btn-ghost btn-sm"
+          style={{ marginTop: 10, width: '100%', border: '1px solid var(--primary)', color: 'var(--primary)' }}
+          onClick={(e) => { e.stopPropagation(); onNavigate ? onNavigate() : onClick() }}
+        >
+          <span className="nav-active-badge"><Icon name="Navigation" size={12} /> En route — Open map</span>
         </button>
       )}
     </div>
@@ -332,13 +407,14 @@ function TaskCard({ task, onClick, onStatus, completed }) {
 }
 
 // ─── TaskDrawer ───────────────────────────────────────────────────────────────
-function TaskDrawer({ task, onClose, onStatus, onCompleted, toast }) {
+function TaskDrawer({ task, onClose, onStatus, onStartNavigation, onCompleted, toast }) {
   const [afterPhoto, setAfterPhoto] = useState(null)
   const [afterUrl, setAfterUrl] = useState(null)
   const [afterNote, setAfterNote] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState(null)
   const [submitting, setSubmitting] = useState(false)
+  const [isCameraOpen, setIsCameraOpen] = useState(false)
   const report = task.report
 
   function handlePhoto(file) {
@@ -443,21 +519,76 @@ function TaskDrawer({ task, onClose, onStatus, onCompleted, toast }) {
                 {afterUrl ? (
                   <div className="image-placeholder" style={{ position: 'relative' }}>
                     <img src={afterUrl} alt="After" />
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.5)', color: '#fff' }}
-                      onClick={() => { setAfterPhoto(null); setAfterUrl(null); setVerifyResult(null) }}
-                    >
-                      <Icon name="X" size={12} /> Re-upload
-                    </button>
+                    <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 6 }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}
+                        onClick={() => setIsCameraOpen(true)}
+                      >
+                        <Icon name="Camera" size={12} /> Retake
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}
+                        onClick={() => { setAfterPhoto(null); setAfterUrl(null); setVerifyResult(null) }}
+                      >
+                        <Icon name="X" size={12} />
+                      </button>
+                    </div>
                   </div>
                 ) : (
-                  <label className="capture-zone small">
-                    <input type="file" accept="image/*" capture="environment" onChange={(e) => e.target.files[0] && handlePhoto(e.target.files[0])} hidden />
-                    <Icon name="Camera" size={28} />
-                    <span>Take after photo</span>
-                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsCameraOpen(true)}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '16px 12px',
+                        background: 'var(--surface-muted)',
+                        border: '2px dashed var(--primary)',
+                        borderRadius: 'var(--radius-sm)',
+                        cursor: 'pointer',
+                        gap: 6,
+                        textAlign: 'center',
+                      }}
+                    >
+                      <Icon name="Camera" size={24} color="var(--primary)" />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Take photo</span>
+                    </button>
+
+                    <label
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '16px 12px',
+                        background: 'var(--surface-muted)',
+                        border: '2px dashed var(--border-strong)',
+                        borderRadius: 'var(--radius-sm)',
+                        cursor: 'pointer',
+                        gap: 6,
+                        textAlign: 'center',
+                      }}
+                    >
+                      <input type="file" accept="image/*" onChange={(e) => e.target.files[0] && handlePhoto(e.target.files[0])} hidden />
+                      <Icon name="UploadCloud" size={24} color="var(--text-muted)" />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Upload file</span>
+                    </label>
+                  </div>
                 )}
+
+                <CameraCaptureModal
+                  isOpen={isCameraOpen}
+                  onClose={() => setIsCameraOpen(false)}
+                  onCapture={(file) => handlePhoto(file)}
+                  title="Take After Cleanup Photo"
+                />
               </div>
 
               <div className="form-group">
@@ -489,8 +620,16 @@ function TaskDrawer({ task, onClose, onStatus, onCompleted, toast }) {
 
         <div className="drawer-footer">
           <button className="btn btn-ghost" onClick={onClose}>Close</button>
-          {task.status === 'Assigned' && <button className="btn btn-primary" onClick={() => onStatus('En route')}><Icon name="Navigation" size={16} /> En route</button>}
-          {task.status === 'En route' && <button className="btn btn-primary" onClick={() => onStatus('On site')}><Icon name="MapPin" size={16} /> On site</button>}
+          {task.status === 'Assigned' && (
+            <button className="btn btn-primary" onClick={onStartNavigation}>
+              <Icon name="Navigation" size={16} /> Start Navigation
+            </button>
+          )}
+          {task.status === 'En route' && (
+            <button className="btn btn-primary" onClick={onStartNavigation}>
+              <Icon name="Navigation" size={16} /> Open Live Map
+            </button>
+          )}
           {task.status === 'On site' && (
             <button
               className="btn btn-success"

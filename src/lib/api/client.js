@@ -1,6 +1,6 @@
 import { generateReferenceCode, generateTaskCode } from './constants.js'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
+const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || 'http://localhost:3001'
 const SESSION_KEY = 'swachhlens-session-v1'
 const authListeners = new Set()
 const channelListeners = new Set()
@@ -162,29 +162,44 @@ function makeAuthApi() {
 				},
 			}
 		},
-		async signUp({ email, password, role, full_name, phone, zone }) {
-			const result = await request('/api/auth/signup', {
-				method: 'POST',
-				body: JSON.stringify({ email, password, role, full_name, phone, zone }),
-			})
-			return { data: result, error: null }
+		async signUp({ email, password, role, full_name, phone, zone, latitude, longitude }) {
+			try {
+				const result = await request('/api/auth/signup', {
+					method: 'POST',
+					body: JSON.stringify({ email, password, role, full_name, phone, zone, latitude, longitude }),
+				})
+				const session = { user: result.user }
+				writeSession(session)
+				emitAuth('SIGNED_IN', session)
+				return { data: { user: result.user, profile: result.profile, session }, error: null }
+			} catch (error) {
+				return { data: null, error }
+			}
 		},
 		async ensureUser({ email, password, role, full_name, phone, zone, latitude, longitude, is_available }) {
-			const result = await request('/api/auth/ensure', {
-				method: 'POST',
-				body: JSON.stringify({ email, password, role, full_name, phone, zone, latitude, longitude, is_available }),
-			})
-			return { data: result, error: null }
+			try {
+				const result = await request('/api/auth/ensure', {
+					method: 'POST',
+					body: JSON.stringify({ email, password, role, full_name, phone, zone, latitude, longitude, is_available }),
+				})
+				return { data: result, error: null }
+			} catch (error) {
+				return { data: null, error }
+			}
 		},
 		async signInWithPassword({ email, password }) {
-			const result = await request('/api/auth/signin', {
-				method: 'POST',
-				body: JSON.stringify({ email, password }),
-			})
-			const session = { user: result.user }
-			writeSession(session)
-			emitAuth('SIGNED_IN', session)
-			return { data: { user: result.user, session }, error: null }
+			try {
+				const result = await request('/api/auth/signin', {
+					method: 'POST',
+					body: JSON.stringify({ email, password }),
+				})
+				const session = { user: result.user }
+				writeSession(session)
+				emitAuth('SIGNED_IN', session)
+				return { data: { user: result.user, session, profile: result.profile }, error: null }
+			} catch (error) {
+				return { data: null, error }
+			}
 		},
 		async signOut() {
 			writeSession(null)

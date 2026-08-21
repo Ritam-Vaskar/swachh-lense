@@ -5,6 +5,7 @@ import queryRoutes from './routes/queryRoutes.js'
 import authRoutes from './routes/authRoutes.js'
 import storageRoutes from './routes/storageRoutes.js'
 import agentRoutes from './routes/agentRoutes.js'
+import municipalityRoutes from './routes/municipalityRoutes.js'
 
 export function createApp() {
   const app = express()
@@ -18,6 +19,8 @@ export function createApp() {
   app.use('/api/storage', storageRoutes)
   // Agentic pipeline endpoints — one route file, mounted per phase
   app.use('/api/agents', agentRoutes)
+  // Municipality management & scoped queries
+  app.use('/api/municipalities', municipalityRoutes)
 
   return app
 }

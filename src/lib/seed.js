@@ -27,77 +27,88 @@ function analyzeReport({ description, category, hazard_flag }) {
 }
 
 const seedReports = [
+  // ─── Bengaluru (BBMP) ────────────────────────────────────────────────────
   {
     category: 'Overflowing bin',
     location: 'MG Road, near Metro Station Gate 2',
-    zone: 'Central',
-    volume: 'Overflowing',
-    hazard_flag: true,
+    zone: 'Central', volume: 'Overflowing', hazard_flag: true,
     description: 'Bin has not been cleared in four days. Waste spilling onto the road and pedestrians are walking around it.',
-    resident_name: 'Anita Rao',
-    duplicate_count: 3,
-    latitude: 12.9756,
-    longitude: 77.6050,
+    resident_name: 'Anita Rao', duplicate_count: 3, latitude: 12.9756, longitude: 77.6050,
+    municipality_name: 'Bengaluru',
   },
   {
     category: 'Illegal dumpsite',
     location: 'Sector 14, behind the wholesale market',
-    zone: 'West',
-    volume: 'Large',
-    hazard_flag: false,
+    zone: 'West', volume: 'Large', hazard_flag: false,
     description: 'Construction debris and packaging dumped on empty plot overnight.',
-    resident_name: 'Mohan Iyer',
-    duplicate_count: 1,
-    latitude: 12.9620,
-    longitude: 77.5480,
+    resident_name: 'Mohan Iyer', duplicate_count: 1, latitude: 12.9620, longitude: 77.5480,
+    municipality_name: 'Bengaluru',
   },
   {
     category: 'Blocked drain',
     location: 'Lake View Road, opposite Park entrance',
-    zone: 'Riverside',
-    volume: 'Medium',
-    hazard_flag: true,
+    zone: 'Riverside', volume: 'Medium', hazard_flag: true,
     description: 'Drain blocked with plastic and leaves. Water backing up into the street after light rain.',
-    resident_name: 'Priya Nair',
-    duplicate_count: 2,
-    latitude: 12.9420,
-    longitude: 77.5780,
+    resident_name: 'Priya Nair', duplicate_count: 2, latitude: 12.9420, longitude: 77.5780,
+    municipality_name: 'Bengaluru',
   },
   {
     category: 'Street litter',
     location: 'Indiranagar 100ft Road, near bus stop',
-    zone: 'East',
-    volume: 'Small',
-    hazard_flag: false,
+    zone: 'East', volume: 'Small', hazard_flag: false,
     description: 'Food wrappers and cups around the bus stop after the weekend market.',
-    resident_name: 'Rahul Das',
-    duplicate_count: 1,
-    latitude: 12.9719,
-    longitude: 77.6412,
+    resident_name: 'Rahul Das', duplicate_count: 1, latitude: 12.9719, longitude: 77.6412,
+    municipality_name: 'Bengaluru',
   },
   {
     category: 'Medical waste',
     location: 'City Hospital back gate, 4th Cross',
-    zone: 'North',
-    volume: 'Small',
-    hazard_flag: true,
+    zone: 'North', volume: 'Small', hazard_flag: true,
     description: 'Used syringes and gloves spotted near the hospital waste collection point.',
-    resident_name: 'Dr. Kavya Menon',
-    duplicate_count: 1,
-    latitude: 13.0120,
-    longitude: 77.5650,
+    resident_name: 'Dr. Kavya Menon', duplicate_count: 1, latitude: 13.0120, longitude: 77.5650,
+    municipality_name: 'Bengaluru',
   },
   {
     category: 'Public toilet issue',
     location: 'Central Bus Stand, Platform 4 exit',
-    zone: 'Central',
-    volume: 'Medium',
-    hazard_flag: false,
+    zone: 'Central', volume: 'Medium', hazard_flag: false,
     description: 'Public toilet not cleaned today and water supply is cut off.',
-    resident_name: 'Suresh Pillai',
-    duplicate_count: 4,
-    latitude: 12.9900,
-    longitude: 77.5700,
+    resident_name: 'Suresh Pillai', duplicate_count: 4, latitude: 12.9900, longitude: 77.5700,
+    municipality_name: 'Bengaluru',
+  },
+  // ─── Bhubaneswar (BMC) ───────────────────────────────────────────────────
+  {
+    category: 'Overflowing bin',
+    location: 'Rajmahal Square, near Kalinga Hospital',
+    zone: 'Central', volume: 'Large', hazard_flag: false,
+    description: 'Overflowing bin near the hospital gate. Strong odour, attracting insects.',
+    resident_name: 'Bijay Mohapatra', duplicate_count: 2, latitude: 20.2961, longitude: 85.8245,
+    municipality_name: 'Bhubaneswar',
+  },
+  {
+    category: 'Street litter',
+    location: 'Janpath Road, opposite State Museum',
+    zone: 'East', volume: 'Small', hazard_flag: false,
+    description: 'Plastic bags and food wrappers scattered along the footpath.',
+    resident_name: 'Suchitra Das', duplicate_count: 1, latitude: 20.2790, longitude: 85.8380,
+    municipality_name: 'Bhubaneswar',
+  },
+  // ─── Pune (PMC) ──────────────────────────────────────────────────────────
+  {
+    category: 'Illegal dumpsite',
+    location: 'Kothrud, near Vanaz Factory Road',
+    zone: 'West', volume: 'Large', hazard_flag: true,
+    description: 'Large pile of construction rubble and household waste dumped illegally.',
+    resident_name: 'Vikram Kulkarni', duplicate_count: 3, latitude: 18.5076, longitude: 73.8063,
+    municipality_name: 'Pune',
+  },
+  {
+    category: 'Blocked drain',
+    location: 'FC Road, near Deccan Gymkhana',
+    zone: 'Central', volume: 'Medium', hazard_flag: false,
+    description: 'Drain choked with leaves and plastic. Flooding expected with next rain.',
+    resident_name: 'Aishwarya Joshi', duplicate_count: 1, latitude: 18.5204, longitude: 73.8567,
+    municipality_name: 'Pune',
   },
 ]
 
@@ -107,14 +118,151 @@ const sampleTasks = [
 ]
 
 const demoAccounts = [
+  // Super Admin Account (Full access to all municipalities)
+  {
+    email: 'superadmin@swachhlens.local',
+    password: 'Swachh123!',
+    role: 'superadmin',
+    full_name: 'National Super Admin',
+    phone: '+91 99000 00000',
+    zone: 'Central',
+  },
+  // Dedicated Municipality Operators
+  {
+    email: 'operator.bengaluru@swachhlens.local',
+    password: 'Swachh123!',
+    role: 'operator',
+    full_name: 'BBMP Bengaluru Control Desk',
+    phone: '+91 98000 10001',
+    zone: 'Central',
+  },
+  {
+    email: 'operator.bhubaneswar@swachhlens.local',
+    password: 'Swachh123!',
+    role: 'operator',
+    full_name: 'BMC Bhubaneswar Control Desk',
+    phone: '+91 98000 10002',
+    zone: 'Central',
+  },
+  {
+    email: 'operator.kolkata@swachhlens.local',
+    password: 'Swachh123!',
+    role: 'operator',
+    full_name: 'KMC Kolkata Control Desk',
+    phone: '+91 98000 10003',
+    zone: 'Central',
+  },
+  {
+    email: 'operator.pune@swachhlens.local',
+    password: 'Swachh123!',
+    role: 'operator',
+    full_name: 'PMC Pune Control Desk',
+    phone: '+91 98000 10004',
+    zone: 'Central',
+  },
+  // Backward-compatible Demo Operator (mapped to Bengaluru)
   {
     email: 'operator@swachhlens.local',
     password: 'Swachh123!',
     role: 'operator',
-    full_name: 'Demo Operator',
-    phone: '',
+    full_name: 'Demo Operator (Bengaluru)',
+    phone: '+91 90000 00001',
     zone: 'Central',
   },
+  // Kolkata Worker Groups
+  {
+    email: 'kolkata.saltlake@squad.local',
+    password: 'Swachh123!',
+    role: 'worker',
+    full_name: 'Kolkata Squad - Salt Lake',
+    phone: '+91 98300 20001',
+    zone: 'East',
+    latitude: 22.5804,
+    longitude: 88.4378,
+  },
+  {
+    email: 'kolkata.parkstreet@squad.local',
+    password: 'Swachh123!',
+    role: 'worker',
+    full_name: 'Kolkata Squad - Park Street',
+    phone: '+91 98300 20002',
+    zone: 'Central',
+    latitude: 22.5518,
+    longitude: 88.3524,
+  },
+  {
+    email: 'kolkata.newtown@squad.local',
+    password: 'Swachh123!',
+    role: 'worker',
+    full_name: 'Kolkata Squad - New Town',
+    phone: '+91 98300 20003',
+    zone: 'North',
+    latitude: 22.5937,
+    longitude: 88.4720,
+  },
+  {
+    email: 'kolkata.gariahat@squad.local',
+    password: 'Swachh123!',
+    role: 'worker',
+    full_name: 'Kolkata Squad - Gariahat',
+    phone: '+91 98300 20004',
+    zone: 'South',
+    latitude: 22.5195,
+    longitude: 88.3653,
+  },
+  // Bhubaneswar Worker Groups
+  {
+    email: 'bbsr.patia@squad.local',
+    password: 'Swachh123!',
+    role: 'worker',
+    full_name: 'Bhubaneswar Squad - Patia',
+    phone: '+91 94370 30001',
+    zone: 'North',
+    latitude: 20.3588,
+    longitude: 85.8160,
+  },
+  {
+    email: 'bbsr.saheednagar@squad.local',
+    password: 'Swachh123!',
+    role: 'worker',
+    full_name: 'Bhubaneswar Squad - Saheed Nagar',
+    phone: '+91 94370 30002',
+    zone: 'Central',
+    latitude: 20.2885,
+    longitude: 85.8436,
+  },
+  {
+    email: 'bbsr.nayapalli@squad.local',
+    password: 'Swachh123!',
+    role: 'worker',
+    full_name: 'Bhubaneswar Squad - Nayapalli',
+    phone: '+91 94370 30003',
+    zone: 'West',
+    latitude: 20.3012,
+    longitude: 85.8155,
+  },
+  {
+    email: 'bbsr.khandagiri@squad.local',
+    password: 'Swachh123!',
+    role: 'worker',
+    full_name: 'Bhubaneswar Squad - Khandagiri',
+    phone: '+91 94370 30004',
+    zone: 'West',
+    latitude: 20.2582,
+    longitude: 85.7836,
+  },
+  // Pune Squad
+  {
+    email: 'pune.kothrud@squad.local',
+    password: 'Swachh123!',
+    role: 'worker',
+    full_name: 'Pune Squad - Kothrud',
+    phone: '+91 98200 40001',
+    zone: 'West',
+    latitude: 18.5076,
+    longitude: 73.8063,
+  },
+  // Legacy Squads
   {
     email: 'green@squad.local',
     password: 'Swachh123!',
@@ -135,14 +283,49 @@ const demoAccounts = [
     latitude: 12.9442,
     longitude: 77.5808,
   },
+  {
+    email: 'bbsr@squad.local',
+    password: 'Swachh123!',
+    role: 'worker',
+    full_name: 'Bhubaneswar Squad',
+    phone: '+91 90000 10003',
+    zone: 'Central',
+    latitude: 20.3568,
+    longitude: 85.8198,
+  },
 ]
 
 export async function seedDemoData() {
   const { count } = await api.from('swachhlens_reports').select('*', { count: 'exact', head: true })
   if (count && count > 0) return false
 
+  // Fetch municipalities to link IDs
+  const { data: munis } = await api.from('municipalities').select('*')
+  const muniMap = new Map()
+  if (munis) {
+    for (const m of munis) muniMap.set(m.slug, m)
+  }
+
+  const bbmp = muniMap.get('bengaluru')
+  const bmc = muniMap.get('bhubaneswar')
+  const pmc = muniMap.get('pune')
+  const kmc = muniMap.get('kolkata')
+
   const seededProfiles = {}
   for (const account of demoAccounts) {
+    let muni = null
+    if (account.role === 'superadmin' || account.email.startsWith('superadmin')) {
+      muni = null
+    } else if (account.email.includes('bbsr') || account.email.includes('bhubaneswar')) {
+      muni = bmc
+    } else if (account.email.includes('kolkata')) {
+      muni = kmc
+    } else if (account.email.includes('pune')) {
+      muni = pmc
+    } else if (account.email.includes('bengaluru') || account.email.includes('green') || account.email.includes('river') || account.email === 'operator@swachhlens.local') {
+      muni = bbmp
+    }
+
     const { data: authData } = await api.auth.ensureUser({
       email: account.email,
       password: account.password,
@@ -153,21 +336,14 @@ export async function seedDemoData() {
       latitude: account.latitude,
       longitude: account.longitude,
       is_available: true,
+      municipality_id: muni?.id || null,
     })
-    const profileCheck = await api.from('profiles').select('id').eq('id', authData.user.id).maybeSingle()
-    if (!profileCheck.data) {
-      const { data: profile } = await api.from('profiles').insert({
-        id: authData.user.id,
+
+    if (authData?.user) {
+      await api.from('profiles').update({ 
         role: account.role,
-        full_name: account.full_name,
-        phone: account.phone || '',
-        zone: account.zone || 'Central',
-        latitude: account.latitude,
-        longitude: account.longitude,
-        is_available: true,
-      }).select().single()
-      if (profile?.id) seededProfiles[account.full_name] = profile
-    } else {
+        municipality_id: muni?.id || null 
+      }).eq('id', authData.user.id)
       seededProfiles[account.full_name] = { id: authData.user.id }
     }
   }
@@ -200,6 +376,8 @@ export async function seedDemoData() {
       approval_status: approval,
       assigned_worker_id: i < 2 ? (i === 0 ? seededProfiles['Green Squad A']?.id : seededProfiles['River Crew B']?.id) : null,
       citizen_update: status === 'Assigned' ? 'Crew dispatched and on the way.' : approval === 'Auto-approved' ? 'Report auto-approved and queued for worker assignment.' : 'Report received and awaiting operator review.',
+      // Include municipality_name so the backend can link to the municipalities table via the post-seed migration
+      municipality_name: s.municipality_name || null,
     }
     const { data } = await api.from('swachhlens_reports').insert(reportRow).select().single()
 

@@ -14,16 +14,25 @@
 
 import { Router } from 'express'
 import { runIntakeAgent } from '../agents/intakeAgent.js'
+import { resolveMunicipality } from '../lib/municipalityResolver.js'
 
 const router = Router()
 
 // ---------------------------------------------------------------------------
 // POST /api/agents/intake
+// Performs full availability check, persistence, and worker assignment.
 // ---------------------------------------------------------------------------
 router.post('/intake', async (req, res) => {
   try {
     const result = await runIntakeAgent(req.body || {})
-    if (!result.success) return res.status(400).json({ error: result.error })
+    if (!result.success) {
+      return res.status(422).json({
+        success: false,
+        error: result.error,
+        reason: result.reason || 'VALIDATION_FAILED',
+      })
+    }
+
     res.status(201).json(result)
   } catch (err) {
     console.error('[Route /agents/intake]', err)
@@ -96,7 +105,7 @@ router.post('/approve/:reportId', async (req, res) => {
     )
     if (tasks.length === 0) {
       const { runDispatchAgent } = await import('../agents/dispatchAgent.js')
-      setImmediate(() => runDispatchAgent(reportId))
+      await runDispatchAgent(reportId)
     }
 
     res.json({ success: true, ...result })

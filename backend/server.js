@@ -4,13 +4,22 @@ import { seedDatabaseIfNeeded } from './models/database.js'
 import { startEscalationAgent } from './agents/escalationAgent.js'
 
 const app = createApp()
-const port = Number(process.env.PORT || 3001)
 
-await seedDatabaseIfNeeded()
+// Vercel's serverless runtime imports this file and uses the default export
+// as the request handler — it does NOT call app.listen().
+// Locally (no VERCEL env var) we start the server the traditional way.
+const isVercel = !!process.env.VERCEL
 
-// Start the Escalation Agent (checks every 60 seconds)
-startEscalationAgent(60000)
+if (!isVercel) {
+  const port = Number(process.env.PORT || 3001)
+  await seedDatabaseIfNeeded()
+  startEscalationAgent(60000)
+  app.listen(port, () => {
+    console.log(`SwachhLens API listening on http://localhost:${port}`)
+  })
+} else {
+  // On Vercel: seed once on cold start, skip the long-running cron agent
+  await seedDatabaseIfNeeded()
+}
 
-app.listen(port, () => {
-  console.log(`SwachhLens API listening on http://localhost:${port}`)
-})
+export default app

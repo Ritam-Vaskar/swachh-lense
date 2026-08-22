@@ -207,7 +207,7 @@ function OperatorDashboard() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark"><Icon name="Leaf" size={20} /></div>
+          <div className="brand-mark"><img src="/icon-96x96.png" alt="SwachhLense" /></div>
           <div>
             SwachhLens
             <div className="brand-sub">

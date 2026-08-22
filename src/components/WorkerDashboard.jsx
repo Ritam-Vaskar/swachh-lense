@@ -238,7 +238,7 @@ export default function WorkerDashboard({ onSignOut }) {
     <div className="worker-app">
       <header className="worker-header">
         <div className="brand">
-          <div className="brand-mark"><Icon name="HardHat" size={20} /></div>
+          <div className="brand-mark"><img src="/icon-96x96.png" alt="SwachhLense" /></div>
           <div>SwachhLens <span className="brand-sub">Worker</span></div>
         </div>
         <div className="worker-header-info">

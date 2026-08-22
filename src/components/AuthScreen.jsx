@@ -100,7 +100,7 @@ export default function AuthScreen({ onCitizen }) {
     <div className="auth-screen">
       <div className="auth-card" style={{ maxWidth: 480 }}>
         <div className="auth-brand">
-          <div className="brand-mark"><Icon name="Leaf" size={24} /></div>
+          <div className="brand-mark"><img src="/icon-96x96.png" alt="SwachhLense" /></div>
           <h1>SwachhLens</h1>
           <p>Civic waste intelligence & operations across India&apos;s municipalities.</p>
         </div>

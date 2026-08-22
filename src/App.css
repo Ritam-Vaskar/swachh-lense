@@ -125,13 +125,18 @@ body {
 .brand-mark {
   width: 36px;
   height: 36px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
-  display: grid;
-  place-items: center;
-  color: white;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(22, 163, 74, 0.35);
+  overflow: hidden;
+}
+
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .brand-sub {
@@ -1332,9 +1337,8 @@ table.reports tr:last-child td {
 .auth-brand .brand-mark {
   width: 56px;
   height: 56px;
-  border-radius: 16px;
+  border-radius: 12px;
   margin: 0 auto 14px;
-  box-shadow: 0 4px 20px rgba(22, 163, 74, 0.3);
 }
 
 .auth-brand h1 {

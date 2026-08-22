@@ -202,7 +202,7 @@ export default function CitizenPortal({ onBackToSignIn }) {
     <div className="citizen-app">
       <header className="citizen-header">
         <div className="brand">
-          <div className="brand-mark"><Icon name="Leaf" size={20} /></div>
+          <div className="brand-mark"><img src="/icon-96x96.png" alt="SwachhLense" /></div>
           <div>SwachhLens <span className="brand-sub">Citizen</span></div>
         </div>
         <div className="citizen-header-actions">

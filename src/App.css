@@ -1629,6 +1629,25 @@ table.reports tr:last-child td {
   margin-bottom: 0;
 }
 
+.citizen-map-wrap {
+  height: 280px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.citizen-submit-btn {
+  width: 100%;
+  padding: 14px;
+  font-size: 15px;
+  font-weight: 600;
+  justify-content: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius);
+  transition: all var(--dur);
+}
+
 .capture-zone {
   display: flex;
   flex-direction: column;
@@ -2885,15 +2904,193 @@ table.reports tr:last-child td {
   }
 }
 
-@media (max-width: 760px) {
+/* ── Citizen Portal — Responsive ───────────────────────────── */
 
+/* Tablet: 760px and below */
+@media (max-width: 760px) {
   .capture-grid,
   .review-grid {
     grid-template-columns: 1fr;
   }
 
-  .citizen-header-actions .btn span {
+  /* Reorder: form fields first, map second on mobile */
+  .capture-grid {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .capture-right {
+    order: 2;
+  }
+
+  .capture-left {
+    order: 1;
+  }
+
+  /* Shrink map height on tablet */
+  .citizen-map-wrap {
+    height: 220px;
+  }
+
+  .citizen-main {
+    padding: 16px 16px 72px;
+  }
+
+  .citizen-header {
+    padding: 0 16px;
+    height: auto;
+    min-height: 56px;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .citizen-header-actions {
+    gap: 4px;
+  }
+
+  .citizen-tab {
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+
+  /* Shrink "Staff login" button text on tablet */
+  .citizen-header-actions .btn-ghost span {
     display: none;
+  }
+}
+
+/* Mobile: 520px and below */
+@media (max-width: 520px) {
+  .citizen-header {
+    padding: 10px 14px;
+    height: auto;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .citizen-header-actions {
+    width: 100%;
+    justify-content: space-between;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+    margin-top: 2px;
+  }
+
+  .citizen-tab {
+    flex: 1;
+    justify-content: center;
+    font-size: 12.5px;
+    padding: 7px 8px;
+  }
+
+  .citizen-main {
+    padding: 14px 12px 80px;
+  }
+
+  /* Full-width photo upload buttons */
+  .capture-left .panel-body > div[style*="grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Bigger touch targets for camera / upload buttons */
+  .capture-left button[style*="padding: '24px 16px'"],
+  .capture-left label[style*="padding: '24px 16px'"] {
+    padding: 20px 14px !important;
+  }
+
+  /* Submit button — full width, large touch target */
+  .capture-right .btn-primary,
+  .capture-right .btn-ghost {
+    width: 100%;
+    padding: 16px;
+    font-size: 15px;
+    justify-content: center;
+    margin-top: 14px;
+  }
+
+  /* Map — compact on phones */
+  .citizen-map-wrap {
+    height: 180px;
+  }
+
+  /* Analyzing / submitting loading card */
+  .analyzing-card,
+  .done-card {
+    padding: 40px 16px;
+  }
+
+  /* Done card — ref code smaller, readable */
+  .done-ref {
+    font-size: 17px;
+    padding: 10px 16px;
+    word-break: break-all;
+  }
+
+  .done-summary {
+    max-width: 100%;
+    padding: 12px;
+  }
+
+  /* Row buttons stack vertically */
+  .done-card .row-gap {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .done-card .row-gap .btn {
+    width: 100%;
+    justify-content: center;
+    padding: 14px;
+    font-size: 14px;
+  }
+
+  /* Track view */
+  .track-view {
+    max-width: 100%;
+  }
+
+  .track-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .track-header .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .track-card {
+    padding: 14px 12px;
+  }
+
+  .track-card-top {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* GPS status pill wraps text */
+  .gps-status {
+    font-size: 12px;
+    flex-wrap: wrap;
+    word-break: break-word;
+  }
+
+  /* Retake / choose another — stack vertically */
+  div[style*="display: 'flex'"][style*="gap: 8"][style*="marginTop: 12"] {
+    flex-direction: column;
+  }
+
+  /* AI rejected card */
+  .analyzing-card[style*="padding: '40px 20px'"] {
+    padding: 32px 14px !important;
+  }
+
+  /* Availability banners */
+  div[style*="marginTop: 12"][style*="borderRadius: 8"] {
+    font-size: 12px;
   }
 }
 

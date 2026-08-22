@@ -471,21 +471,20 @@ function CaptureStep({ photoUrl, gps, gpsError, availability, description, setDe
           <div className="panel-header"><h3 className="panel-title">Your location</h3></div>
           <div className="panel-body">
             {gps ? (
-              <MapView reports={[]} center={[gps.lat, gps.lng]} zoom={15} height={300} />
+              <div className="citizen-map-wrap">
+                <MapView reports={[]} center={[gps.lat, gps.lng]} zoom={15} height="100%" />
+              </div>
             ) : (
-              <div className="image-placeholder" style={{ height: 300 }}>
+              <div className="citizen-map-wrap image-placeholder">
                 <div><Icon name="MapPinOff" size={28} /><div style={{ fontSize: 13, marginTop: 6 }}>Waiting for GPS…</div></div>
               </div>
             )}
             
             {photoUrl && (
               <button
-                className={`btn ${isBlocked ? 'btn-ghost' : 'btn-primary'}`}
+                className={`btn citizen-submit-btn ${isBlocked ? 'btn-ghost' : 'btn-primary'}`}
                 style={{
-                  width: '100%',
                   marginTop: 20,
-                  padding: 14,
-                  fontSize: 16,
                   cursor: isBlocked || isChecking ? 'not-allowed' : 'pointer',
                   opacity: isBlocked ? 0.6 : 1,
                 }}
